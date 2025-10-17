@@ -10,11 +10,8 @@ export const createCourt = handleAsync(async (req, res, next) => {
     return res.json(createResponse(true, 201, 'Tạo sân thành công !', court));
 });
 export const getDetailCourt = handleAsync(async (req, res, next) => {
-    const { id } = req.params;
-    if (id) {
-        const court = await Court.findById(id);
-        return res.json(createResponse(true, 200, 'Lấy chi tiết sân thành công !', court));
-    }
+    const court = await Court.findById(req.params.id);
+    if (court) return res.json(createResponse(true, 200, 'Lấy chi tiết sân thành công !', court));
     next(createError(false, 400, 'Not found Court'));
 });
 export const getListCourts = handleAsync(async (req, res, next) => {
@@ -22,25 +19,21 @@ export const getListCourts = handleAsync(async (req, res, next) => {
     return res.json(createResponse(true, 200, 'Lấy danh sách sân thành công !', court));
 });
 export const updateCourt = handleAsync(async (req, res, next) => {
-    const { id } = req.params;
-    if (id) {
-        const court = await Court.findByIdAndUpdate(id, req.body);
-        return res.json(createResponse(true, 200, 'Cập nhật sân thành công !', court));
-    }
+    const court = await Court.findByIdAndUpdate(req.params.id, req.body);
+    if (court) return res.json(createResponse(true, 200, 'Cập nhật sân thành công !', court));
     next(createError(false, 400, ' Court update Failed!'));
 });
 export const deleteCourt = handleAsync(async (req, res, next) => {
     const { id } = req.params;
-    if (id) {
-        await Court.findByIdAndDelete(id);
-        return res.json(createResponse(true, 200, 'Xóa sân thành công !'));
-    }
+    const court = await Court.findByIdAndDelete(id);
+    if (court) return res.json(createResponse(true, 200, 'Xóa sân thành công !'));
     next(createError(false, 400, 'Xóa sân thất bại !'));
 });
 export const softDeleteCourt = handleAsync(async (req, res, next) => {
     const { id } = req.params;
     if (id) {
-        await Court.findByIdAndUpdate(id, {
+        await Court.findOneAndUpdate({
+            id,
             deleteAt: new Date(),
         });
         return res.json(createResponse(true, 200, 'Ẩn sân thành công !'));

@@ -7,11 +7,18 @@ import {
     softDeleteCourt,
     updateCourt,
 } from './court.controller.js';
+import validBodyrequest from '../../common/middlewares/validBodyRequest.js';
+import courtSchema from './court.schema.js';
+
 const routesCourt = Router();
-routesCourt.post('/', createCourt);
+
 routesCourt.get('/', getListCourts);
 routesCourt.get('/:id', getDetailCourt);
-routesCourt.patch('/:id', updateCourt);
+
 routesCourt.delete('/:id', deleteCourt);
 routesCourt.delete('/soft-delete/:id', softDeleteCourt);
+
+routesCourt.use(validBodyrequest(courtSchema));
+routesCourt.post('/', createCourt);
+routesCourt.patch('/:id', updateCourt);
 export default routesCourt;

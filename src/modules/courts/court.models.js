@@ -44,6 +44,6 @@ const courtSchema = new mongoose.Schema(
     },
     { timestamps: true }
 );
-courtSchema.index({ code: 1 }, { unique: true });
+//courtSchema.index({ code: 1 }, { unique: true });
 const Court = mongoose.model('Court', courtSchema);
 export default Court;
