@@ -2,7 +2,6 @@ import createError from '../../utils/error.js';
 import handleAsync from '../../utils/handleAsync.js';
 import createResponse from '../../utils/responses.js';
 import { Court, CourtAmenity } from './court.models.js';
-
 // export const createCourt = handleAsync(async (req, res, next) => {
 //     const { amenities, ...courtData } = req.body;
 //     const existing = await Court.findOne({ code: courtData.code });
@@ -63,7 +62,7 @@ export const getListCourts = handleAsync(async (req, res, next) => {
         ];
     }
 
-    const courts = await Court.find(filter).sort({ createAt: -1 });
+    const courts = await Court.find(filter).sort({ createdAt: -1 });
 
     // Lấy amenities cho từng sân
     const courtsWithAmenities = await Promise.all(
