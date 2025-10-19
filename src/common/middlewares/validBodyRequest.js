@@ -1,4 +1,3 @@
-// middlewares/validBodyRequest.js
 const validBodyRequest = (schema) => (req, res, next) => {
     const r = schema.safeParse(req.body);
     if (!r.success) {
@@ -12,8 +11,7 @@ const validBodyRequest = (schema) => (req, res, next) => {
             })),
         });
     }
-    req.data = r.data;
-    return next();
+    req.body = r.data;
+    next();
 };
-
 export default validBodyRequest;
