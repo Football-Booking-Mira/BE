@@ -93,3 +93,39 @@ export const resetPasswordService = async (resetToken, newPassword) => {
     throw error;
   }
 };
+
+export const verifyResetTokenService = async (resetToken) => {
+  try {
+    const decoded = verifyToken(resetToken);
+
+    const user = await userModels.findOne({
+      _id: decoded._id,
+      resetPasswordToken: resetToken,
+      resetPasswordExpires: { $gt: new Date() },
+    });
+
+    if (!user) {
+      throw createError(
+        StatusCodes.BAD_REQUEST,
+        "Token reset không hợp lệ hoặc đã hết hạn!"
+      );
+    }
+
+    return {
+      valid: true,
+      message: "Token hợp lệ",
+      user: {
+        _id: user._id,
+        email: user.email,
+        name: user.name,
+      },
+    };
+  } catch (error) {
+    if (error.name === "JsonWebTokenError") {
+      throw createError(StatusCodes.UNAUTHORIZED, "Token reset không hợp lệ!");
+    }
+    throw error;
+  }
+};
+
+

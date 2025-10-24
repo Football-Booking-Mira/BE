@@ -1,10 +1,9 @@
-const createResponse = (success, statusCode, message, data) => {
-    return {
-        success,
-        status: statusCode,
-        message,
-        data: data || null,
-    };
+const createResponse = (statusCode, message, data) => {
+  return {
+    status: statusCode,
+    message,
+    data: data || null,
+  };
 };
 
 export default createResponse;
