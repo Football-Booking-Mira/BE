@@ -11,13 +11,15 @@ const USER_STATUS_ENUM = ["active", "inactive", "banned"];
 
 const UserSchema = new Schema(
   {
-    username: { type: String, required: true, trim: true },
+    name: { type: String, required: true, trim: true },
     phone: { type: String, trim: true },
     email: { type: String, unique: true, sparse: true, trim: true },
     password: { type: String, required: true },
     role: { type: String, enum: ROLE_ENUM, default: "user" },
     status: { type: String, enum: USER_STATUS_ENUM, default: "active" },
     avatar: { type: String, default: "" },
+    resetPasswordToken: { type: String },
+    resetPasswordExpires: { type: Date },
   },
   {
     timestamps: { createdAt: "createdAt", updatedAt: "updatedAt" },
