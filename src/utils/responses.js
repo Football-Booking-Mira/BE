@@ -1,5 +1,6 @@
-const createResponse = (statusCode, message, data) => {
+const createResponse = (success, statusCode, message, data) => {
   return {
+    success,
     status: statusCode,
     message,
     data: data || null,

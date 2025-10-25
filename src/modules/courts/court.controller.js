@@ -76,9 +76,7 @@ export const getListCourts = handleAsync(async (req, res, next) => {
     );
 
     return res.json(
-        createResponse(true, 200, 'Lấy danh sách sân thành công!', {
-            courts: courtsWithAmenities,
-        })
+        createResponse(true, 200, 'Lấy danh sách sân thành công!', courtsWithAmenities)
     );
 });
 
@@ -120,7 +118,7 @@ export const updateCourt = handleAsync(async (req, res, next) => {
                 courtId: court._id,
                 name: trim(),
             }));
-            await CourtAmenity.insertMany(docsameniti, { ordered: false }).catch(() => {});
+            await CourtAmenity.insertMany(docsameniti, { ordered: false }).catch(() => { });
         }
     }
     //lấy lại amenities
