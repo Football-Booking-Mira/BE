@@ -5,6 +5,7 @@ import {
   login,
   register,
   resetPassword,
+  verifyEmail,
   verifyResetToken,
 } from "./auth.controller.js";
 import { loginValidation, registerValidation } from "./auth.validation.js";
@@ -16,6 +17,7 @@ authRouter.post("/login", login);
 authRouter.post("/forgot-password", forgotPassword);
 
 authRouter.post("/reset-password", resetPassword);
-authRouter.post("/verify", verifyResetToken);
+authRouter.post("/verify-token", verifyResetToken);
+authRouter.post("/verify-email", verifyEmail);
 
 export default authRouter;

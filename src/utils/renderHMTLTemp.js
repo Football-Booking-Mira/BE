@@ -1,5 +1,3 @@
-import { FONT_END_URL } from "../common/config/environment.js";
-
 export function renderEmailTemplate(params) {
   const year = params.year || new Date().getFullYear();
 
@@ -46,6 +44,70 @@ export function renderEmailTemplate(params) {
                   <p style="font-size:12px;color:#9ca3af;">
                     Nếu bạn không yêu cầu, có thể bỏ qua email này. Tài khoản của bạn vẫn an toàn.
                   </p>
+                </td>
+              </tr>
+              <tr>
+                <td style="text-align:center;padding:16px 8px;color:#9ca3af;font-size:12px;">
+                  © ${year} ${params.companyName} · <a href="${params.supportUrl}" style="color:#6b7280;">Hỗ trợ</a>
+                </td>
+              </tr>
+            </table>
+          </td></tr>
+        </table>
+      </body>
+    </html>
+    `;
+  }
+
+  if (params.type === "verify-email") {
+    return `
+    <!doctype html>
+    <html lang="vi">
+      <head>
+        <meta charset="utf-8" />
+        <title>Xác thực email</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+      </head>
+      <body style="margin:0;padding:0;background:#f5f7fb;">
+        <table role="presentation" width="100%" style="background:#f5f7fb;">
+          <tr><td align="center" style="padding:24px;">
+            <table role="presentation" style="max-width:600px;width:100%;">
+              <tr>
+                <td align="center">
+                  <a href="${params.homepageUrl}">
+                    <img src="${params.logoUrl}" width="120" style="display:block;margin:0 auto;border:0;">
+                  </a>
+                </td>
+              </tr>
+              <tr>
+                <td style="background:#fff;border-radius:12px;padding:28px 24px;color:#111827;border:1px solid #e5e7eb;">
+                  <h1 style="font-size:20px;margin:0 0 12px;">✉️ Xác thực email của bạn</h1>
+                  <p style="font-size:14px;color:#4b5563;">
+                    Xin chào ${params.userName},
+                  </p>
+                  <p style="font-size:14px;color:#4b5563;">
+                    Cảm ơn bạn đã đăng ký tài khoản tại <strong>${params.productName}</strong>!
+                    Để hoàn tất quá trình đăng ký, vui lòng xác thực email
+                    <strong>${params.email}</strong> bằng cách bấm nút bên dưới.
+                  </p>
+                  <p style="font-size:14px;color:#4b5563;">
+                    Liên kết xác thực sẽ hết hạn sau <strong>${params.tokenTTLMinutes} phút</strong>.
+                  </p>
+                  <a href="${params.verifyUrl}"
+                     style="display:inline-block;margin:16px 0;padding:14px 28px;background:#10b981;color:#fff;
+                     border-radius:8px;font-weight:600;text-decoration:none;font-size:16px;">
+                    XÁC THỰC EMAIL
+                  </a>
+                  <p style="font-size:12px;color:#6b7280;">
+                    Nếu nút không hoạt động, copy đường dẫn này và dán vào trình duyệt:<br>
+                    <span style="word-break:break-all;color:#374151;">${params.verifyUrl}</span>
+                  </p>
+                  <div style="background:#f3f4f6;border-left:4px solid #10b981;padding:12px;border-radius:4px;margin-top:16px;">
+                    <p style="font-size:12px;color:#6b7280;margin:0;">
+                      <strong>💡 Mẹo bảo mật:</strong> Nếu bạn không tạo tài khoản này, vui lòng bỏ qua email này hoặc
+                      <a href="${params.supportUrl}" style="color:#10b981;">liên hệ đội hỗ trợ</a>.
+                    </p>
+                  </div>
                 </td>
               </tr>
               <tr>
@@ -124,9 +186,14 @@ const base = (type, email, name, link) =>
     userName: name,
     logoUrl: "https://logo.png",
     resetUrl: link,
+    verifyUrl: link,
     tokenTTLMinutes: 15,
   });
+
 export const htmlForgot = (email, name, link) =>
   base("forgot", email, name, link);
+
+export const htmlVerify = (email, name, link) =>
+  base("verify-email", email, name, link);
 
 export const htmlReset = (email, name) => base("reset-success", email, name);

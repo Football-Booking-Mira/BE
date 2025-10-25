@@ -7,17 +7,30 @@ import {
   forgotPasswordService,
   resetPasswordService,
   verifyResetTokenService,
+  verifyEmailService,
 } from "./auth.service.js";
 import { FONT_END_URL } from "../../common/config/environment.js";
 import sendMail from "../../utils/sendEmail.js";
-import { htmlForgot, htmlReset } from "../../utils/renderHMTLTemp.js";
+import { htmlForgot, htmlVerify } from "../../utils/renderHMTLTemp.js";
 
 export const register = handleAsync(async (req, res, next) => {
   const response = await registerService(req.body);
+
+  const link = `${FONT_END_URL}/verify-email?token=${response.verificationToken}`;
+  await sendMail({
+    to: response.user.email,
+    subject: "Xác thực email để kích hoạt tài khoản",
+    html: htmlVerify(response.user.email, response.user.name, link),
+  });
+
   return res
-    .status(StatusCodes.OK)
+    .status(StatusCodes.CREATED)
     .json(
-      createResponse(StatusCodes.CREATED, "Đăng ký thành công", response)
+      createResponse(
+        StatusCodes.CREATED,
+        "Đăng ký thành công! Vui lòng kiểm tra email để xác thực tài khoản",
+        { user: response.user, message: "Email xác thực đã được gửi" }
+      )
     );
 });
 
@@ -31,14 +44,12 @@ export const login = handleAsync(async (req, res, next) => {
 export const forgotPassword = handleAsync(async (req, res, next) => {
   const { email } = req.body;
   const result = await forgotPasswordService(email);
-  console.log(result);
   const link = `${FONT_END_URL}/verify?token=${result.resetToken}`;
-  const ok = await sendMail({
+  await sendMail({
     to: email,
     subject: "Xác nhận đặt lại mật khẩu",
     html: htmlForgot(email, result.user.name, link),
   });
-  console.log(ok);
   return res
     .status(StatusCodes.OK)
     .json(
@@ -56,7 +67,7 @@ export const resetPassword = handleAsync(async (req, res, next) => {
   const result = await resetPasswordService(resetToken, newPassword);
   return res
     .status(StatusCodes.OK)
-    .json(createResponse("Ok", StatusCodes.OK, result.message));
+    .json(createResponse(StatusCodes.OK, result.message));
 });
 
 export const verifyResetToken = handleAsync(async (req, res, next) => {
@@ -64,7 +75,16 @@ export const verifyResetToken = handleAsync(async (req, res, next) => {
   const result = await verifyResetTokenService(resetToken);
   return res
     .status(StatusCodes.OK)
-    .json(createResponse("Ok", StatusCodes.OK, result.message, result.user));
+    .json(createResponse(StatusCodes.OK, result.message, result.user));
 });
 
-// export const
+export const verifyEmail = handleAsync(async (req, res, next) => {
+  const { verificationToken } = req.body;
+  const result = await verifyEmailService(verificationToken);
+  return res.status(StatusCodes.OK).json(
+    createResponse(StatusCodes.OK, result.message, {
+      user: result.user,
+      accessToken: result.accessToken,
+    })
+  );
+});

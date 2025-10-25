@@ -6,15 +6,41 @@ import bcrypt from "bcryptjs";
 
 export const registerService = async (payload) => {
   const existsUser = await userModels.findOne({ email: payload.email });
-  if (existsUser) {
+
+  // Nếu user đã tồn tại và email đã verified, không cho đăng ký lại
+  if (existsUser && existsUser.isEmailVerified) {
     throw createError(
       StatusCodes.BAD_REQUEST,
       "Tài khoản này đã được đăng ký!"
     );
   }
+
   const password = await hashPassword(payload.password);
-  const user = await userModels.create({ ...payload, password });
-  return user;
+  const verificationToken = generateToken({ email: payload.email }, "15m");
+
+  // Nếu user chưa xác thực email, cập nhật token mới
+  if (existsUser && !existsUser.isEmailVerified) {
+    existsUser.password = password;
+    const user = await userModels.findByIdAndUpdate(existsUser._id, {
+      password,
+      verificationToken,
+      verificationTokenExpires: new Date(Date.now() + 15 * 60 * 1000),
+    });
+
+    return { user, verificationToken };
+  }
+
+  // Tạo user mới nếu chưa tồn tại
+  const user = await userModels.create({
+    ...payload,
+    password,
+    status: "inactive",
+    isEmailVerified: false,
+    verificationToken,
+    verificationTokenExpires: new Date(Date.now() + 15 * 60 * 1000),
+  });
+
+  return { user, verificationToken };
 };
 
 export const loginService = async (payload) => {
@@ -23,6 +49,12 @@ export const loginService = async (payload) => {
     throw createError(
       StatusCodes.BAD_REQUEST,
       "Thông tin đăng nhập không chính xác!"
+    );
+  }
+  if (findUser.status !== "active") {
+    throw createError(
+      StatusCodes.UNAUTHORIZED,
+      "Tài khoản chưa được kích hoạt hoặc đã bị vô hiệu hóa!"
     );
   }
   const matchedPassword = await bcrypt.compare(
@@ -128,4 +160,82 @@ export const verifyResetTokenService = async (resetToken) => {
   }
 };
 
+export const verifyEmailService = async (verificationToken) => {
+  try {
+    const decoded = verifyToken(verificationToken);
 
+    const user = await userModels.findOne({
+      email: decoded.email,
+    });
+
+    if (!user) {
+      throw createError(
+        StatusCodes.BAD_REQUEST,
+        "Email không tìm thấy trong hệ thống!"
+      );
+    }
+
+    // So sánh token chính xác
+    if (user.verificationToken !== verificationToken) {
+      throw createError(StatusCodes.BAD_REQUEST, "Token xác thực không khớp!");
+    }
+
+    // Kiểm tra token chưa hết hạn
+    if (
+      !user.verificationTokenExpires ||
+      new Date() > user.verificationTokenExpires
+    ) {
+      throw createError(
+        StatusCodes.BAD_REQUEST,
+        "Token xác thực đã hết hạn! Vui lòng đăng ký lại."
+      );
+    }
+
+    // Nếu email đã verified, không cần xác thực lại
+    if (user.isEmailVerified) {
+      return {
+        message: "Email đã được xác thực trước đó. Bạn có thể đăng nhập.",
+        user: {
+          _id: user._id,
+          email: user.email,
+          name: user.name,
+          status: user.status,
+        },
+      };
+    }
+
+    user.isEmailVerified = true;
+    user.status = "active";
+    user.verificationToken = undefined;
+    user.verificationTokenExpires = undefined;
+    await user.save();
+
+    const jwtData = {
+      _id: user._id,
+      role: user.role,
+    };
+    const accessToken = generateToken(jwtData);
+
+    return {
+      message:
+        "Email đã được xác thực thành công! Tài khoản của bạn đã được kích hoạt.",
+      user: {
+        _id: user._id,
+        email: user.email,
+        name: user.name,
+        status: user.status,
+        role: user.role,
+      },
+      accessToken,
+    };
+  } catch (error) {
+    console.error("❌ Verify email error:", error.message);
+    if (error.name === "JsonWebTokenError") {
+      throw createError(
+        StatusCodes.UNAUTHORIZED,
+        "Token xác thực không hợp lệ!"
+      );
+    }
+    throw error;
+  }
+};
