@@ -1,5 +1,4 @@
 import { StatusCodes } from "http-status-codes";
-import createResponse from "../../utils/responses.js";
 import handleAsync from "../../utils/handleAsync.js";
 import {
   loginService,
@@ -12,6 +11,14 @@ import {
 import { FONT_END_URL } from "../../common/config/environment.js";
 import sendMail from "../../utils/sendEmail.js";
 import { htmlForgot, htmlVerify } from "../../utils/renderHMTLTemp.js";
+
+const createResponse = (statusCode, message, data) => {
+  return {
+    status: statusCode,
+    message,
+    data: data || null,
+  };
+};
 
 export const register = handleAsync(async (req, res, next) => {
   const response = await registerService(req.body);
