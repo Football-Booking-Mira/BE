@@ -15,17 +15,13 @@ const courtSchema = z.object({
         })
         .default('active'),
     basePrice: z
-        .number({
-            required_error: 'Giá cơ bản là bắt buộc',
-            invalid_type_error: 'Giá cơ bản phải là số',
-        })
-        .min(0, 'Giá cơ bản phải lớn hơn hoặc bằng 0'),
+        .string()
+        .refine((val) => !isNaN(Number(val)) && Number(val) >= 0, 'Giá cơ bản phải là số >= 0')
+        .transform((val) => Number(val)),
     peakPrice: z
-        .number({
-            required_error: 'Giá cao điểm là bắt buộc',
-            invalid_type_error: 'Giá cao điểm phải là số',
-        })
-        .min(0, 'Giá cao điểm phải lớn hơn hoặc bằng 0'),
+        .string()
+        .refine((val) => !isNaN(Number(val)) && Number(val) >= 0, 'Giá cao điểm phải là số >= 0')
+        .transform((val) => Number(val)),
     formats: z.string().optional(),
     description: z.string().optional(),
     images: z.array(z.string().url('URL ảnh không hợp lệ')).optional(),
@@ -37,8 +33,14 @@ const updateCourtSchema = z.object({
     name: z.string().min(1, 'Tên sân không được để trống').optional(),
     type: z.enum(['indoor', 'outdoor', 'vip']).optional(),
     status: z.enum(['active', 'maintenance', 'locked']).optional(),
-    basePrice: z.number().min(0, 'Giá cơ bản phải lớn hơn hoặc bằng 0').optional(),
-    peakPrice: z.number().min(0, 'Giá cao điểm phải lớn hơn hoặc bằng 0').optional(),
+    basePrice: z
+        .string()
+        .refine((val) => !isNaN(Number(val)) && Number(val) >= 0, 'Giá cơ bản phải là số >= 0')
+        .transform((val) => Number(val)),
+    peakPrice: z
+        .string()
+        .refine((val) => !isNaN(Number(val)) && Number(val) >= 0, 'Giá cao điểm phải là số >= 0')
+        .transform((val) => Number(val)),
     formats: z.string().optional(),
     description: z.string().optional(),
     amenities: z.array(z.string()).optional(),
