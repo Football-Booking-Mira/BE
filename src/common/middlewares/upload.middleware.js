@@ -17,7 +17,9 @@ const storage = new CloudinaryStorage({
         folder: 'courts',
         resource_type: 'auto',
         allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
-        public_id: file.originalname.split('.')[0],
+        public_id: `${Date.now()}-${Math.round(Math.random() * 1e9)}-${
+            file.originalname.split('.')[0]
+        }`,
     }),
 });
 const upload = multer({ storage });
