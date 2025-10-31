@@ -5,12 +5,9 @@
     "description": "API By Trịnh Quốc Hùng",
     "version": "1.0.0"
   },
-  "host": "localhost:3000",
+  "host": "localhost:8000",
   "basePath": "/api",
-  "schemes": [
-    "http",
-    "https"
-  ],
+  "schemes": ["http", "https"],
   "securityDefinitions": {
     "BearerAuth": {
       "type": "http",
@@ -18,12 +15,8 @@
       "bearerFormat": "JWT"
     }
   },
-  "consumes": [
-    "application/json"
-  ],
-  "produces": [
-    "application/json"
-  ],
+  "consumes": ["application/json"],
+  "produces": ["application/json"],
   "paths": {
     "/courts/": {
       "get": {

@@ -3,6 +3,9 @@ import createError from '../../utils/error.js';
 import handleAsync from '../../utils/handleAsync.js';
 import createResponse from '../../utils/responses.js';
 import { Court, CourtAmenity } from './court.models.js';
+import Booking from '../bookings/booking.models.js';
+
+
 import { v2 as cloudinary } from 'cloudinary';
 import {
     CLOUDINARY_CLOUD_NAME,
@@ -105,6 +108,62 @@ export const getListCourts = handleAsync(async (req, res, next) => {
         createResponse(true, 200, 'Lấy danh sách sân thành công!', courtsWithAmenities)
     );
 });
+export const getAvailableCourts = handleAsync(async (req, res, next) => {
+    const { date, startTime, endTime, type } = req.query;
+
+    if (!date || !startTime || !endTime) {
+        return next(createError(400, 'Thiếu tham số: date, startTime và endTime là bắt buộc'));
+    }
+
+    // Helper: chuyển HH:mm → phút
+    function hhmmToMinutes(hhmm) {
+        if (typeof hhmm !== 'string') return null;
+        const [hh, mm] = hhmm.split(':').map(Number);
+        if (Number.isNaN(hh) || Number.isNaN(mm)) return null;
+        return hh * 60 + mm;
+    }
+
+    const startMinute = hhmmToMinutes(startTime);
+    const endMinute = hhmmToMinutes(endTime);
+    if (startMinute === null || endMinute === null || endMinute <= startMinute) {
+        return next(createError(400, 'startTime/endTime không hợp lệ'));
+    }
+
+    // Chuẩn hóa ngày
+    const day = new Date(date);
+    day.setHours(0, 0, 0, 0);
+    const nextDay = new Date(day);
+    nextDay.setDate(nextDay.getDate() + 1);
+
+    // Tìm các lịch trùng giờ trong ngày đó (loại bỏ các booking đã hủy)
+    const overlapQuery = {
+        date: { $gte: day, $lt: nextDay },
+        status: { $ne: 'cancelled' },
+        $and: [{ startMinute: { $lt: endMinute } }, { endMinute: { $gt: startMinute } }],
+    };
+
+    const overlapping = await Booking.find(overlapQuery).select('courtId').lean();
+    const bookedCourtIds = overlapping.map(b => String(b.courtId));
+
+    const courtFilter = { status: 'active' };
+    if (bookedCourtIds.length) courtFilter._id = { $nin: bookedCourtIds };
+    if (type) courtFilter.type = type;
+
+    const courts = await Court.find(courtFilter).sort({ createdAt: -1 }).lean();
+
+    // Gắn danh sách tiện ích (nếu có)
+    const courtsWithAmenities = await Promise.all(
+        courts.map(async (court) => {
+            const amenities = await CourtAmenity.find({ courtId: court._id })
+                .select('name -_id')
+                .lean();
+            return { ...court, amenities: amenities.map(a => a.name) };
+        })
+    );
+
+    return res.json(createResponse(true, 200, 'Danh sách sân trống', courtsWithAmenities));
+});
+
 
 export const getDetailCourt = handleAsync(async (req, res, next) => {
     const court = await Court.findById(req.params.id);
@@ -285,7 +344,7 @@ export const updateCourt = handleAsync(async (req, res, next) => {
         const parts = url.split('/');
         const filename = parts[parts.length - 1].split('.')[0];
         // nếu bạn dùng CloudinaryStorage thì public_id có thể khác; với folder 'courts' theo code createCourt:
-        await cloudinary.uploader.destroy(`courts/${filename}`).catch(() => {});
+        await cloudinary.uploader.destroy(`courts/${filename}`).catch(() => { });
     }
 
     //  Upload ảnh mới (nếu có)
@@ -317,7 +376,7 @@ export const updateCourt = handleAsync(async (req, res, next) => {
         const docs = [...new Set(amenities)]
             .map((name) => ({ courtId: court._id, name }))
             .filter((d) => d.name);
-        await CourtAmenity.insertMany(docs, { ordered: false }).catch(() => {});
+        await CourtAmenity.insertMany(docs, { ordered: false }).catch(() => { });
     }
 
     const amenList = await CourtAmenity.find({ courtId: court._id }).select('name').lean();

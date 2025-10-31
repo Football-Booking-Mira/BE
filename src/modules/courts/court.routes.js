@@ -4,6 +4,7 @@ import {
     deleteCourt,
     getDetailCourt,
     getListCourts,
+    getAvailableCourts,
     softDeleteCourt,
     updateCourt,
     updateCourtMaintenance,
@@ -15,6 +16,7 @@ import upload from '../../common/middlewares/upload.middleware.js';
 const routesCourt = Router();
 
 routesCourt.get('/', getListCourts);
+routesCourt.get('/available', getAvailableCourts);
 routesCourt.get('/:id', getDetailCourt);
 routesCourt.delete('/:id', deleteCourt);
 routesCourt.delete('/soft-delete/:id', softDeleteCourt);
@@ -26,7 +28,8 @@ routesCourt.patch(
     validBodyrequest(updateCourtSchema),
     updateCourt
 );
-//Bảo trì
+
+// Bảo trì
 routesCourt.patch('/maintenance/:id', updateCourtMaintenance);
 
 export default routesCourt;
