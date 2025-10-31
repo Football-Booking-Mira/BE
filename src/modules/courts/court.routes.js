@@ -19,10 +19,10 @@ routesCourt.get('/:id', getDetailCourt);
 routesCourt.delete('/:id', deleteCourt);
 routesCourt.delete('/soft-delete/:id', softDeleteCourt);
 
-routesCourt.post('/', upload.array('images', 5), validBodyrequest(courtSchema), createCourt);
+routesCourt.post('/', upload.array('images', 10), validBodyrequest(courtSchema), createCourt);
 routesCourt.patch(
     '/:id',
-    upload.array('images', 5),
+    upload.array('images', 10),
     validBodyrequest(updateCourtSchema),
     updateCourt
 );

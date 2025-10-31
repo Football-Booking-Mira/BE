@@ -20,12 +20,11 @@ export const createCourt = handleAsync(async (req, res, next) => {
     let amenities = [];
     const courtData = { ...req.body };
 
-    // Nếu form-data chứa dạng amenities[0], amenities[1]
+    // Gom amenities từ form-data
     const amenityKeys = Object.keys(req.body).filter((key) => key.startsWith('amenities['));
     if (amenityKeys.length > 0) {
         amenities = amenityKeys.map((key) => req.body[key]).filter(Boolean);
     } else if (Array.isArray(req.body.amenities)) {
-        // Nếu gửi bằng JSON (raw)
         amenities = req.body.amenities;
     }
 
@@ -34,9 +33,17 @@ export const createCourt = handleAsync(async (req, res, next) => {
         return next(createError(400, 'Mã sân đã tồn tại!'));
     }
 
-    //Upload ảnh từ Cloudinary
+    // Upload ảnh song song lên Cloudinary
     if (req.files && req.files.length > 0) {
-        courtData.images = req.files.map((file) => file.path || file.secure_url).filter(Boolean);
+        const uploadResults = await Promise.all(
+            req.files.map((file) =>
+                cloudinary.uploader.upload(file.path, {
+                    folder: 'courts',
+                    resource_type: 'image',
+                })
+            )
+        );
+        courtData.images = uploadResults.map((r) => r.secure_url);
     }
 
     // Tạo sân
@@ -55,7 +62,7 @@ export const createCourt = handleAsync(async (req, res, next) => {
         }
     }
 
-    //Lấy lại tiện nghi để trả về
+    // Lấy lại tiện nghi để trả về
     const amenitiesList = await CourtAmenity.find({ courtId: court._id }).select('name').lean();
 
     return res.status(201).json(
@@ -65,7 +72,6 @@ export const createCourt = handleAsync(async (req, res, next) => {
         })
     );
 });
-
 export const getListCourts = handleAsync(async (req, res, next) => {
     const { type, status, search } = req.query;
 
@@ -79,14 +85,17 @@ export const getListCourts = handleAsync(async (req, res, next) => {
         ];
     }
 
-    const courts = await Court.find(filter).sort({ createdAt: -1 });
+    // Lấy danh sách sân
+    const courts = await Court.find(filter).sort({ createdAt: -1 }).lean();
 
-    // Lấy amenities cho từng sân
+    // Gắn amenities vào từng sân
     const courtsWithAmenities = await Promise.all(
         courts.map(async (court) => {
-            const amenities = await CourtAmenity.find({ courtId: court._id }).select('name').lean();
+            const amenities = await CourtAmenity.find({ courtId: court._id })
+                .select('name -_id')
+                .lean();
             return {
-                ...court.toObject(),
+                ...court,
                 amenities: amenities.map((a) => a.name),
             };
         })
@@ -167,67 +176,160 @@ export const getDetailCourt = handleAsync(async (req, res, next) => {
 //         })
 //     );
 // });
+// export const updateCourt = handleAsync(async (req, res, next) => {
+//     let { amenities = [], ...updateData } = req.body;
+
+//     // Gom amenities từ form-data
+//     const amenityKeys = Object.keys(req.body).filter((k) => k.startsWith('amenities['));
+//     if (amenityKeys.length > 0) {
+//         amenities = amenityKeys.map((k) => req.body[k]).filter(Boolean);
+//     } else if (typeof req.body.amenities === 'string') {
+//         amenities = [req.body.amenities];
+//     } else if (Array.isArray(req.body.amenities)) {
+//         amenities = req.body.amenities;
+//     }
+
+//     // Ảnh mới: xóa ảnh cũ trên Cloudinary rồi thay
+//     if (req.files && req.files.length > 0) {
+//         const courtOld = await Court.findById(req.params.id);
+//         if (courtOld?.images?.length) {
+//             for (const url of courtOld.images) {
+//                 const parts = url.split('/');
+//                 const filename = parts[parts.length - 1].split('.')[0];
+//                 await cloudinary.uploader.destroy(`courts/${filename}`).catch(() => {});
+//             }
+//         }
+//         updateData.images = req.files.map((f) => f.path || f.secure_url).filter(Boolean);
+//     }
+
+//     // Check mã trùng
+//     if (updateData.code) {
+//         const existing = await Court.findOne({
+//             code: updateData.code,
+//             _id: { $ne: req.params.id },
+//         });
+//         if (existing) return next(createError(400, 'Mã sân đã tồn tại!'));
+//     }
+
+//     const court = await Court.findByIdAndUpdate(req.params.id, updateData, {
+//         new: true,
+//         runValidators: true,
+//     });
+//     if (!court) return next(createError(404, 'Không tìm thấy sân'));
+
+//     // Cập nhật amenities
+//     await CourtAmenity.deleteMany({ courtId: court._id });
+//     if (amenities?.length) {
+//         const docs = [...new Set(amenities.map((a) => String(a).trim()).filter(Boolean))].map(
+//             (name) => ({
+//                 courtId: court._id,
+//                 name,
+//             })
+//         );
+//         await CourtAmenity.insertMany(docs, { ordered: false }).catch(() => {});
+//     }
+
+//     const amenitiesList = await CourtAmenity.find({ courtId: court._id }).select('name').lean();
+//     return res.json(
+//         createResponse(true, 200, 'Cập nhật sân thành công !', {
+//             ...court.toObject(),
+//             amenities: amenitiesList.map((a) => a.name),
+//         })
+//     );
+// });
+
 export const updateCourt = handleAsync(async (req, res, next) => {
-    let { amenities = [], ...updateData } = req.body;
+    console.log('BODY:', req.body);
+    console.log('📷 FILES:', req.files?.length || 0);
 
-    // Gom amenities từ form-data
-    const amenityKeys = Object.keys(req.body).filter((k) => k.startsWith('amenities['));
-    if (amenityKeys.length > 0) {
-        amenities = amenityKeys.map((k) => req.body[k]).filter(Boolean);
-    } else if (typeof req.body.amenities === 'string') {
-        amenities = [req.body.amenities];
-    } else if (Array.isArray(req.body.amenities)) {
-        amenities = req.body.amenities;
+    // Lấy & chuẩn hoá amenities
+    let { amenities = [], keepImages, ...updateData } = req.body;
+
+    // amenities có thể là "wifi, ia" hoặc mảng chuỗi
+    if (typeof amenities === 'string') {
+        amenities = amenities
+            .split(',')
+            .map((a) => a.trim())
+            .filter(Boolean);
+    } else if (Array.isArray(amenities)) {
+        amenities = amenities.map((a) => String(a).trim()).filter(Boolean);
+    } else {
+        amenities = [];
     }
 
-    // Ảnh mới: xóa ảnh cũ trên Cloudinary rồi thay
-    if (req.files && req.files.length > 0) {
-        const courtOld = await Court.findById(req.params.id);
-        if (courtOld?.images?.length) {
-            for (const url of courtOld.images) {
-                const parts = url.split('/');
-                const filename = parts[parts.length - 1].split('.')[0];
-                await cloudinary.uploader.destroy(`courts/${filename}`).catch(() => {});
-            }
+    // Ép kiểu số cho giá
+    ['basePrice', 'peakPrice'].forEach((k) => {
+        if (updateData[k] !== undefined && updateData[k] !== null && updateData[k] !== '') {
+            updateData[k] = Number(updateData[k]);
         }
-        updateData.images = req.files.map((f) => f.path || f.secure_url).filter(Boolean);
-    }
+    });
 
-    // Check mã trùng
+    // Check trùng mã
     if (updateData.code) {
-        const existing = await Court.findOne({
-            code: updateData.code,
-            _id: { $ne: req.params.id },
-        });
-        if (existing) return next(createError(400, 'Mã sân đã tồn tại!'));
+        const exists = await Court.findOne({ code: updateData.code, _id: { $ne: req.params.id } });
+        if (exists) return next(createError(400, 'Mã sân đã tồn tại!'));
     }
 
+    const courtOld = await Court.findById(req.params.id);
+    if (!courtOld) return next(createError(404, 'Không tìm thấy sân'));
+
+    //  keepImages có thể là string hoặc array
+    let keepList = [];
+    if (keepImages) {
+        keepList = Array.isArray(keepImages) ? keepImages : [keepImages];
+    }
+
+    //  Xoá ảnh cũ không còn giữ
+    const toDelete = (courtOld.images || []).filter((url) => !keepList.includes(url));
+    for (const url of toDelete) {
+        const parts = url.split('/');
+        const filename = parts[parts.length - 1].split('.')[0];
+        // nếu bạn dùng CloudinaryStorage thì public_id có thể khác; với folder 'courts' theo code createCourt:
+        await cloudinary.uploader.destroy(`courts/${filename}`).catch(() => {});
+    }
+
+    //  Upload ảnh mới (nếu có)
+    let newUrls = [];
+    if (req.files?.length) {
+        const uploaded = await Promise.all(
+            req.files.map((f) =>
+                cloudinary.uploader.upload(f.path, {
+                    folder: 'courts',
+                    resource_type: 'image',
+                })
+            )
+        );
+        newUrls = uploaded.map((r) => r.secure_url);
+    }
+
+    //  Gộp danh sách ảnh cuối cùng
+    updateData.images = [...keepList, ...newUrls];
+
+    //  Cập nhật Court
     const court = await Court.findByIdAndUpdate(req.params.id, updateData, {
         new: true,
         runValidators: true,
     });
-    if (!court) return next(createError(404, 'Không tìm thấy sân'));
 
-    // Cập nhật amenities
+    //  Cập nhật tiện nghi
     await CourtAmenity.deleteMany({ courtId: court._id });
-    if (amenities?.length) {
-        const docs = [...new Set(amenities.map((a) => String(a).trim()).filter(Boolean))].map(
-            (name) => ({
-                courtId: court._id,
-                name,
-            })
-        );
+    if (amenities.length) {
+        const docs = [...new Set(amenities)]
+            .map((name) => ({ courtId: court._id, name }))
+            .filter((d) => d.name);
         await CourtAmenity.insertMany(docs, { ordered: false }).catch(() => {});
     }
 
-    const amenitiesList = await CourtAmenity.find({ courtId: court._id }).select('name').lean();
+    const amenList = await CourtAmenity.find({ courtId: court._id }).select('name').lean();
+
     return res.json(
-        createResponse(true, 200, 'Cập nhật sân thành công !', {
+        createResponse(true, 200, 'Cập nhật sân thành công!', {
             ...court.toObject(),
-            amenities: amenitiesList.map((a) => a.name),
+            amenities: amenList.map((a) => a.name),
         })
     );
 });
+
 export const softDeleteCourt = handleAsync(async (req, res, next) => {
     //const { id } = req.params;
     // if (id) {
