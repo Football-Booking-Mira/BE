@@ -1,5 +1,4 @@
 import { StatusCodes } from "http-status-codes";
-import createResponse from "../../utils/responses.js";
 import handleAsync from "../../utils/handleAsync.js";
 import {
   loginService,
@@ -12,6 +11,7 @@ import {
 import { FONT_END_URL } from "../../common/config/environment.js";
 import sendMail from "../../utils/sendEmail.js";
 import { htmlForgot, htmlVerify } from "../../utils/renderHMTLTemp.js";
+import createResponse from "../../utils/responses.js";
 
 export const register = handleAsync(async (req, res, next) => {
   const response = await registerService(req.body);
@@ -27,6 +27,7 @@ export const register = handleAsync(async (req, res, next) => {
     .status(StatusCodes.CREATED)
     .json(
       createResponse(
+        true,
         StatusCodes.CREATED,
         "Đăng ký thành công! Vui lòng kiểm tra email để xác thực tài khoản",
         { user: response.user, message: "Email xác thực đã được gửi" }
@@ -38,7 +39,9 @@ export const login = handleAsync(async (req, res, next) => {
   const response = await loginService(req.body);
   return res
     .status(StatusCodes.OK)
-    .json(createResponse(StatusCodes.OK, "Đăng nhập thành công", response));
+    .json(
+      createResponse(true, StatusCodes.OK, "Đăng nhập thành công", response)
+    );
 });
 
 export const forgotPassword = handleAsync(async (req, res, next) => {
@@ -54,7 +57,7 @@ export const forgotPassword = handleAsync(async (req, res, next) => {
     .status(StatusCodes.OK)
     .json(
       createResponse(
-        "Ok",
+        true,
         StatusCodes.OK,
         "Đã gửi link reset mật khẩu đến email của bạn! " + result.email,
         result
@@ -67,7 +70,7 @@ export const resetPassword = handleAsync(async (req, res, next) => {
   const result = await resetPasswordService(resetToken, newPassword);
   return res
     .status(StatusCodes.OK)
-    .json(createResponse(StatusCodes.OK, result.message));
+    .json(createResponse(true, StatusCodes.OK, result.message));
 });
 
 export const verifyResetToken = handleAsync(async (req, res, next) => {
@@ -75,14 +78,14 @@ export const verifyResetToken = handleAsync(async (req, res, next) => {
   const result = await verifyResetTokenService(resetToken);
   return res
     .status(StatusCodes.OK)
-    .json(createResponse(StatusCodes.OK, result.message, result.user));
+    .json(createResponse(true, StatusCodes.OK, result.message, result.user));
 });
 
 export const verifyEmail = handleAsync(async (req, res, next) => {
   const { verificationToken } = req.body;
   const result = await verifyEmailService(verificationToken);
   return res.status(StatusCodes.OK).json(
-    createResponse(StatusCodes.OK, result.message, {
+    createResponse(true, StatusCodes.OK, result.message, {
       user: result.user,
       accessToken: result.accessToken,
     })
