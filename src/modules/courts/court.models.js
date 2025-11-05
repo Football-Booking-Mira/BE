@@ -48,6 +48,11 @@ const courtSchema = new mongoose.Schema(
             type: [String],
             default: [],
         },
+        location: {
+            type: String,
+            trim: true,
+            required: true,
+        },
     },
 
     {
