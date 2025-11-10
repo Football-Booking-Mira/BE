@@ -31,16 +31,16 @@ export const DISCOUNT_TYPES = {
     AMOUNT: 'out_of_stock', //Số tiền
 };
 export const BOOKING_STATUS = {
-    PENDING: 'PENDING', //Chờ xác nhận
-    CONFIRMED: 'out_of_stock', //Đã xác nhận
-    IN_USE: 'in_use', //Đang sử dụng
-    COMPLETED: 'completed', //Hoàn thành
-    CANCELLED: 'cancelled', //Đã hủy
-    NO_SHOW: 'no_show', //Không đến
+    PENDING: 'pending', // Chờ xác nhận
+    CONFIRMED: 'confirmed', // Đã xác nhận
+    IN_USE: 'in_use', // Đang sử dụng
+    COMPLETED: 'completed', // Hoàn thành
+    CANCELLED: 'cancelled', // Đã hủy
 };
+
 export const PAYMENT_STATUS = {
     UNPAID: 'unpaid', //chưa thanh toán
-    PARTIAL: 'PARTIAL', //thanh toán 1 phần
+    PARTIAL: 'partial', //thanh toán 1 phần
     PAID: 'paid', //ĐÃ thanh toán
     REFUNDED: 'refunded', //Đã hoàn tiền
 };

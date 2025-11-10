@@ -1,87 +1,30 @@
-import Joi from "joi";
+import z from 'zod';
+import { PAYMENT_METHOD } from '../../common/constants/enums.js';
 
-export const bookingValidation = {
-  create: Joi.object({
-    // Mã đặt sân — không bắt buộc vì backend có thể tự sinh
-    code: Joi.string()
-      .pattern(/^DS\d{8}$/)
-      .message("Mã đặt sân phải có dạng DSxxxxxxxx")
-      .optional(),
-
-    customerId: Joi.string().allow(null, ""),
-    courtId: Joi.string().required(),
-
-    date: Joi.date().required().messages({
-      "date.base": "Ngày chơi không hợp lệ",
-    }),
-
-    startTime: Joi.string()
-      .pattern(/^([01]\d|2[0-3]):[0-5]\d$/)
-      .required()
-      .messages({
-        "string.pattern.base": "Giờ bắt đầu phải có định dạng HH:mm",
-      }),
-
-    endTime: Joi.string()
-      .pattern(/^([01]\d|2[0-3]):[0-5]\d$/)
-      .required()
-      .messages({
-        "string.pattern.base": "Giờ kết thúc phải có định dạng HH:mm",
-      }),
-
-    // ❌ Không bắt buộc — model tự tính
-    hours: Joi.number().min(0.5).optional(),
-
-    fieldAmount: Joi.number().min(0).required(),
-    equipmentTotal: Joi.number().min(0).default(0),
-    discountTotal: Joi.number().min(0).default(0),
-
-    // ❌ Không bắt buộc — model tự tính
-    total: Joi.number().min(0).optional(),
-
-    status: Joi.string()
-      .valid("pending", "confirmed", "in_use", "completed", "cancelled", "no_show")
-      .default("pending"),
-
-    paymentStatus: Joi.string()
-      .valid("unpaid", "partial", "paid", "refunded")
-      .default("unpaid"),
-
-    depositRequired: Joi.boolean().default(false),
-    depositAmount: Joi.number().min(0).default(0),
-    depositStatus: Joi.string()
-      .valid("pending", "paid", "refunded", "forfeited")
-      .default("pending"),
-    depositMethod: Joi.string().valid("cash", "transfer", "momo", "vnpay", "qr"),
-    depositTxnId: Joi.string().allow("", null),
-
-    checkinAt: Joi.date().allow(null),
-    checkoutAt: Joi.date().allow(null),
-    notes: Joi.string().max(1000).allow("", null),
-  }),
-
-  update: Joi.object({
-    status: Joi.string().valid(
-      "pending",
-      "confirmed",
-      "in_use",
-      "completed",
-      "cancelled",
-      "no_show"
-    ),
-    paymentStatus: Joi.string().valid("unpaid", "partial", "paid", "refunded"),
-    depositStatus: Joi.string().valid("pending", "paid", "refunded", "forfeited"),
-    depositTxnId: Joi.string().allow("", null),
-    notes: Joi.string().max(1000).allow("", null),
-  }),
-
-  checkin: Joi.object({
-    bookingId: Joi.string().required(),
-    checkinAt: Joi.date().required(),
-  }),
-
-  checkout: Joi.object({
-    bookingId: Joi.string().required(),
-    checkoutAt: Joi.date().required(),
-  }),
-};
+export const bookingSchema = z
+    .object({
+        courtId: z.string().min(1, 'Vui lòng chọn sân!'),
+        customerId: z.string().optional(),
+        date: z
+            .string()
+            .refine((val) => !isNaN(Date.parse(val)), { message: 'Ngày đặt không hợp lệ!' }),
+        startTime: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Định dạng giờ phải là HH:mm'),
+        endTime: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Định dạng giờ phải là HH:mm'),
+        paymentMethod: z.enum([PAYMENT_METHOD.VNPAY, PAYMENT_METHOD.CASH], {
+            required_error: 'Vui lòng chọn phương thức thanh toán!',
+        }),
+        note: z.string().max(500).optional(),
+    })
+    .superRefine((data, ctx) => {
+        const [sh, sm] = data.startTime.split(':').map(Number);
+        const [eh, em] = data.endTime.split(':').map(Number);
+        const start = sh * 60 + sm;
+        const end = eh * 60 + em;
+        if (end <= start) {
+            ctx.addIssue({
+                path: ['endTime'],
+                message: 'Giờ kết thúc phải sau giờ bắt đầu!',
+                code: z.ZodIssueCode.custom,
+            });
+        }
+    });
