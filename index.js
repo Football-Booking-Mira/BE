@@ -17,43 +17,53 @@ const app = express();
 app.use(express.json());
 app.use(
     cors({
-        origin: 'http://localhost:5173',
+        origin: FRONT_END_URL || 'http://localhost:5173',
         credentials: true,
     })
 );
 app.use(morgan('dev'));
+
 app.use('/api', routes);
-app.use('/ping', (req, res) => res.send('pong'));
+app.get('/ping', (req, res) => res.send('pong'));
+
 setupSwagger(app);
+
 app.use(notFoundMiddleware);
 app.use(errorMiddleware);
 
-// Socket.IO setup
+//  Tạo HTTP server & Socket.IO
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: {
-        origin: 'http://localhost:5173',
+        origin: FRONT_END_URL || 'http://localhost:5173',
         credentials: true,
     },
 });
+
+// Lưu socket vào app (để các controller emit được)
 app.set('io', io);
 
+//  SOCKET EVENTS
 io.on('connection', (socket) => {
-    console.log('Client connected:', socket.id);
+    console.log(`⚡ Client connected: ${socket.id}`);
 
+    // Client join room sân riêng (nếu cần)
     socket.on('join:court', (courtId) => {
         socket.join(String(courtId));
-        console.log(`Client ${socket.id} joined room: ${courtId}`);
+        console.log(` ${socket.id} joined room: ${courtId}`);
     });
 
     socket.on('leave:court', (courtId) => {
         socket.leave(String(courtId));
-        console.log(`Client ${socket.id} left room: ${courtId}`);
+        console.log(` ${socket.id} left room: ${courtId}`);
     });
 
-    socket.on('disconnect', () => console.log('Client disconnected:', socket.id));
+    socket.on('disconnect', (reason) => {
+        console.log(` Client disconnected: ${socket.id} (${reason})`);
+    });
 });
 
+//  Lắng nghe server
 httpServer.listen(PORT, () => {
-    console.log(`API + Socket.IO running at http://${HOST}:${PORT}`);
+    console.log(` API + Socket.IO running at http://${HOST}:${PORT}`);
 });
