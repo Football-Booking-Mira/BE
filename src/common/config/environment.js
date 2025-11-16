@@ -1,6 +1,5 @@
 import dotenv from 'dotenv';
-
-dotenv.config({});
+dotenv.config();
 
 export const {
     HOST,
@@ -14,7 +13,8 @@ export const {
     FRONT_END_URL,
     EMAIL,
     EMAIL_PASSWORD,
-    VNP_TMNCODE,
-    VNP_HASHSECRET,
+    VNP_TMN_CODE,
+    VNP_HASH_SECRET,
     VNP_URL,
+    VNP_RETURN_URL, // thêm nếu cần
 } = process.env;

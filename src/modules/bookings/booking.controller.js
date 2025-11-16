@@ -107,7 +107,8 @@ export const createBooking = handleAsync(async (req, res, next) => {
         paymentMethod,
         note,
         status: isAdmin ? BOOKING_STATUS.CONFIRMED : BOOKING_STATUS.PENDING,
-        paymentStatus: paymentMethod === 'vnpay' ? PAYMENT_STATUS.PAID : PAYMENT_STATUS.UNPAID,
+        // paymentStatus: paymentMethod === 'vnpay' ? PAYMENT_STATUS.PAID : PAYMENT_STATUS.UNPAID,
+        paymentStatus: PAYMENT_STATUS.UNPAID,
         createdBy: role,
     });
 
