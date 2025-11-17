@@ -114,9 +114,6 @@ const BookingSchema = new Schema(
         timestamps: true,
     }
 );
-BookingSchema.index(
-    { courtId: 1, date: 1, startTime: 1, endTime: 1 },
-    { unique: true, name: 'slot' }
-);
+BookingSchema.index({ courtId: 1, date: 1, startTime: 1, endTime: 1 }, { name: 'slot' });
 const Booking = mongoose.model('Booking', BookingSchema);
 export default Booking;
