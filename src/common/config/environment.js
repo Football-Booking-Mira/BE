@@ -16,5 +16,5 @@ export const {
     VNP_TMN_CODE,
     VNP_HASH_SECRET,
     VNP_URL,
-    VNP_RETURN_URL, // thêm nếu cần
+    VNP_RETURN_URL,
 } = process.env;
