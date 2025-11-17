@@ -1,11 +1,20 @@
+import { BOOKING_STATUS, PAYMENT_STATUS } from '../../common/constants/enums.js';
 import crypto from 'crypto';
 import qs from 'qs';
 import Booking from '../bookings/booking.models.js';
-import { VNP_URL, VNP_TMN_CODE, VNP_HASH_SECRET, VNP_RETURN_URL } from '../../common/config/environment.js';
+import {
+    VNP_URL,
+    VNP_TMN_CODE,
+    VNP_HASH_SECRET,
+    VNP_RETURN_URL,
+    FRONT_END_URL,
+} from '../../common/config/environment.js';
 
 function sortObject(obj) {
     const sorted = {};
-    const keys = Object.keys(obj).map(k => encodeURIComponent(k)).sort();
+    const keys = Object.keys(obj)
+        .map((k) => encodeURIComponent(k))
+        .sort();
     for (const key of keys) {
         sorted[key] = encodeURIComponent(obj[key]).replace(/%20/g, '+');
     }
@@ -15,13 +24,20 @@ function sortObject(obj) {
 export const createVnpayPayment = async (req, res, next) => {
     try {
         const { bookingId } = req.body;
-        if (!bookingId) return res.status(400).json({ success: false, message: 'Thiếu bookingId' });
+        if (!bookingId) {
+            return res.status(400).json({ success: false, message: 'Thiếu bookingId' });
+        }
 
         const booking = await Booking.findById(bookingId);
-        if (!booking) return res.status(404).json({ success: false, message: 'Không tìm thấy booking' });
+        if (!booking) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy booking' });
+        }
 
-        const orderId = 'BK' + Date.now();
-        const createDate = new Date().toISOString().replace(/[-T:\.Z]/g, '').slice(0, 14);
+        const orderId = booking.code;
+        const createDate = new Date()
+            .toISOString()
+            .replace(/[-T:\.Z]/g, '')
+            .slice(0, 14);
         const amount = booking.total * 100;
 
         const vnp_Params = {
@@ -39,18 +55,16 @@ export const createVnpayPayment = async (req, res, next) => {
             vnp_CreateDate: createDate,
         };
 
-        console.log("vnp_Params: ", vnp_Params);
-
-
         const sorted = sortObject(vnp_Params);
         const signData = qs.stringify(sorted, { encode: false });
         const hmac = crypto.createHmac('sha512', VNP_HASH_SECRET.trim());
         const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
 
-        sorted['vnp_SecureHash'] = signed;
+        sorted.vnp_SecureHash = signed;
+
         const paymentUrl = `${VNP_URL}?${qs.stringify(sorted, { encode: false })}`;
 
-        res.json({ success: true, paymentUrl });
+        return res.json({ success: true, paymentUrl });
     } catch (err) {
         next(err);
     }
@@ -58,10 +72,11 @@ export const createVnpayPayment = async (req, res, next) => {
 
 export const vnpayReturn = async (req, res, next) => {
     try {
-        let vnp_Params = req.query;
-        const secureHash = vnp_Params['vnp_SecureHash'];
-        delete vnp_Params['vnp_SecureHash'];
-        delete vnp_Params['vnp_SecureHashType'];
+        let vnp_Params = { ...req.query };
+        const secureHash = vnp_Params.vnp_SecureHash;
+
+        delete vnp_Params.vnp_SecureHash;
+        delete vnp_Params.vnp_SecureHashType;
 
         vnp_Params = sortObject(vnp_Params);
 
@@ -69,22 +84,41 @@ export const vnpayReturn = async (req, res, next) => {
         const hmac = crypto.createHmac('sha512', VNP_HASH_SECRET.trim());
         const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
 
-        if (secureHash === signed) {
-            const booking = await Booking.findOne({ code: vnp_Params.vnp_TxnRef });
-            if (!booking) return res.redirect(`${VNP_RETURN_URL}?status=error`);
-
-            if (vnp_Params.vnp_ResponseCode === '00') {
-                booking.paymentStatus = 'PAID';
-                booking.status = 'CONFIRMED';
-            } else {
-                booking.paymentStatus = 'FAILED';
-            }
-            await booking.save();
-
-            return res.redirect(`${VNP_RETURN_URL}?status=${vnp_Params.vnp_ResponseCode}`);
-        } else {
-            return res.redirect(`${VNP_RETURN_URL}?status=invalid`);
+        if (secureHash !== signed) {
+            return res.redirect(`${FRONT_END_URL}/payment-return?status=invalid`);
         }
+
+        const rspCode = vnp_Params.vnp_ResponseCode; //  thành công
+        const txnRef = vnp_Params.vnp_TxnRef; // booking.code
+
+        const booking = await Booking.findOne({ code: txnRef });
+        if (!booking) {
+            return res.redirect(`${FRONT_END_URL}/payment-return?status=notfound`);
+        }
+
+        if (rspCode === '00') {
+            booking.paymentStatus = PAYMENT_STATUS.PAID;
+            booking.status = BOOKING_STATUS.CONFIRMED;
+        } else {
+            booking.paymentStatus = PAYMENT_STATUS.UNPAID;
+            booking.status = BOOKING_STATUS.CANCELLED;
+        }
+
+        await booking.save();
+
+        //  socket để FE auto reload timeline
+        const io = req.app.get('io');
+        io?.to(String(booking.courtId)).emit('booking_updated', {
+            courtId: String(booking.courtId),
+            date: booking.date.toISOString().slice(0, 10),
+        });
+
+        const query = new URLSearchParams({
+            ...req.query,
+            status: rspCode,
+        }).toString();
+
+        return res.redirect(`${FRONT_END_URL}/payment-return?${query}`);
     } catch (err) {
         next(err);
     }
