@@ -8,7 +8,6 @@ import {
     verifyResetTokenService,
     verifyEmailService,
 } from './auth.service.js';
-
 import sendMail from '../../utils/sendEmail.js';
 import { htmlForgot, htmlVerify } from '../../utils/renderHMTLTemp.js';
 import createResponse from '../../utils/responses.js';
@@ -37,10 +36,10 @@ export const register = handleAsync(async (req, res, next) => {
 });
 
 export const login = handleAsync(async (req, res, next) => {
-    const response = await loginService(req.body);
+    const data = await loginService(req.body); // { user, accessToken }
     return res
         .status(StatusCodes.OK)
-        .json(createResponse(true, StatusCodes.OK, 'Đăng nhập thành công', response));
+        .json(createResponse(true, StatusCodes.OK, 'Đăng nhập thành công', data));
 });
 
 export const forgotPassword = handleAsync(async (req, res, next) => {
@@ -81,10 +80,11 @@ export const verifyResetToken = handleAsync(async (req, res, next) => {
 export const verifyEmail = handleAsync(async (req, res, next) => {
     const { verificationToken } = req.body;
     const result = await verifyEmailService(verificationToken);
+    // result = { message, user, token }
     return res.status(StatusCodes.OK).json(
         createResponse(true, StatusCodes.OK, result.message, {
             user: result.user,
-            accessToken: result.accessToken,
+            token: result.token,
         })
     );
 });
