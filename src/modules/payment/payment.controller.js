@@ -84,29 +84,29 @@ export const vnpayReturn = async (req, res, next) => {
         const hmac = crypto.createHmac('sha512', VNP_HASH_SECRET.trim());
         const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
 
+        // Sai chữ ký -> trả về FE báo invalid
         if (secureHash !== signed) {
             return res.redirect(`${FRONT_END_URL}/payment-return?status=invalid`);
         }
 
-        const rspCode = vnp_Params.vnp_ResponseCode; //  thành công
+        const rspCode = vnp_Params.vnp_ResponseCode; // '00' = thành công
         const txnRef = vnp_Params.vnp_TxnRef; // booking.code
 
+        // Tìm booking theo code
         const booking = await Booking.findOne({ code: txnRef });
         if (!booking) {
             return res.redirect(`${FRONT_END_URL}/payment-return?status=notfound`);
         }
 
+        // CHỈ cập nhật trạng thái thanh toán, KHÔNG đụng vào status (vẫn pending)
         if (rspCode === '00') {
-            booking.paymentStatus = PAYMENT_STATUS.PAID;
-            booking.status = BOOKING_STATUS.CONFIRMED;
-        } else {
-            booking.paymentStatus = PAYMENT_STATUS.UNPAID;
-            booking.status = BOOKING_STATUS.CANCELLED;
+            if (booking.paymentStatus !== PAYMENT_STATUS.PAID) {
+                booking.paymentStatus = PAYMENT_STATUS.PAID;
+                await booking.save();
+            }
         }
 
-        await booking.save();
-
-        //  socket để FE auto reload timeline
+        // Bắn socket cho FE cập nhật lịch sân
         const io = req.app.get('io');
         io?.to(String(booking.courtId)).emit('booking_updated', {
             courtId: String(booking.courtId),
