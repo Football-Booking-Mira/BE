@@ -10,6 +10,7 @@ import {
     getBookingsByCourt,
     calculateBookingPrice,
     getBookingsByUser,
+    updateBooking,
 } from './booking.controller.js';
 import validBodyRequest from '../../common/middlewares/validBodyRequest.js';
 import { bookingSchema } from './booking.schema.js';
@@ -17,25 +18,19 @@ import { authenticate, authorize } from '../../common/middlewares/auth.middlewar
 
 const routesBooking = Router();
 
-//  CRUD
 routesBooking
     .route('/')
     .post(authenticate, validBodyRequest(bookingSchema), createBooking)
     .get(authenticate, getBookings);
 
-//  LẤY BOOKING THEO USER
 routesBooking.get('/user/:userId', authenticate, getBookingsByUser);
-
-//  LẤY BOOKING THEO SÂN
-routesBooking.get('/court/:courtId', getBookingsByCourt); // để FE không cần auth
-
-//  TÍNH TIỀN SÂN
+routesBooking.get('/court/:courtId', getBookingsByCourt);
 routesBooking.get('/calculate', calculateBookingPrice);
 
-//  ADMIN DASHBOARD
 routesBooking.get('/admin/dashboard', authenticate, authorize('admin'), getAdminDashboardBookings);
 
-//  CHECKIN / CHECKOUT / CONFIRM / CANCEL
+routesBooking.patch('/:id', authenticate, authorize('admin'), updateBooking);
+
 routesBooking.patch('/:id/cancel', authenticate, cancelBooking);
 routesBooking.patch('/:id/confirm', authenticate, authorize('admin'), confirmBooking);
 routesBooking.patch('/:id/checkin', authenticate, authorize('admin'), checkinBooking);
