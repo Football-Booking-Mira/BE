@@ -18,3 +18,4 @@ export const {
     VNP_URL,
     VNP_RETURN_URL,
 } = process.env;
+export const JWT_ACCESS_SECRET = JWT_ACCESS_SECRECT || 'default_secret';
