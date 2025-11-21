@@ -1,8 +1,22 @@
 import createResponse from "../../utils/responses.js";
 
 export const errorMiddleware = (err, req, res, next) => {
-  const statusCode = err.statusCode || 500;
+  const statusCode = err.status || err.statusCode || 500;
   const message = err.message || "Lỗi Server";
 
-  res.status(statusCode).json(createResponse(null, statusCode, message, null));
+  // Log error for debugging
+  console.error("❌ Error Middleware:", {
+    message: err.message,
+    stack: err.stack,
+    statusCode,
+    path: req.path,
+    method: req.method,
+  });
+
+  res.status(statusCode).json({
+    success: false,
+    status: statusCode,
+    message,
+    ...(process.env.NODE_ENV === 'development' && { error: err.stack }),
+  });
 };

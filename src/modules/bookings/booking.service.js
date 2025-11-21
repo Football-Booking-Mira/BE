@@ -614,7 +614,20 @@ export async function cancelBookingService(id, body, user) {
     };
   }
 
-  booking.status = "cancelled";
+  // Lưu thông tin hoàn tiền nếu có
+  if (body?.refundAccountNumber) {
+    booking.refundAccountNumber = body.refundAccountNumber.toString().trim();
+  }
+  if (body?.refundAccountName) {
+    booking.refundAccountName = body.refundAccountName.toString().trim();
+  }
+  if (body?.refundBankName) {
+    booking.refundBankName = body.refundBankName.toString().trim();
+  }
+  if (body?.refundNote) {
+    booking.refundNote = body.refundNote.toString().trim();
+  }
+
   const reason = (body?.reason || "").toString().trim();
   if (reason) {
     booking.cancelReason = reason;
@@ -622,6 +635,7 @@ export async function cancelBookingService(id, body, user) {
     booking.cancelReason = "Khách hàng chủ động huỷ đơn.";
   }
 
+  // Cập nhật payment status nếu đã thanh toán
   if (["paid", "partial"].includes(booking.paymentStatus)) {
     booking.paymentStatus = "refunded";
   }
@@ -629,6 +643,20 @@ export async function cancelBookingService(id, body, user) {
   if (booking.depositStatus === "paid") {
     booking.depositStatus = "refunded";
   }
+
+  // Sử dụng pushStatusChange để cập nhật status và statusHistory
+  booking.$locals = booking.$locals || {};
+  booking.$locals.actorId = user?._id ?? null;
+  booking.$locals.statusAction = "cancel";
+  booking.$locals.statusNote = reason || "Khách hàng chủ động huỷ đơn.";
+  
+  await pushStatusChange({
+    booking,
+    nextStatus: "cancelled",
+    req: { user },
+    action: "cancel",
+    note: reason || "Khách hàng chủ động huỷ đơn.",
+  });
 
   await booking.save();
 

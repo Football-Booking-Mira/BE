@@ -38,7 +38,7 @@ const getSuccessRedirectUrl = (status, bookingId, message = "") => {
 const updatePaymentSuccess = async (booking, transactionId, req = null) => {
   if (!booking) {
     console.error("❌ updatePaymentSuccess - Booking is null");
-    return;
+    throw new Error("Booking is required");
   }
   
   console.log("🔄 updatePaymentSuccess - Starting update for booking:", booking._id, {
@@ -47,73 +47,68 @@ const updatePaymentSuccess = async (booking, transactionId, req = null) => {
     transactionId,
   });
   
-  // Tạo request object giả nếu không có (cho IPN callback)
-  const fakeReq = req || {
-    user: booking.customerId ? { _id: booking.customerId } : null
-  };
+  try {
+    // Lấy customerId (có thể là ObjectId hoặc Object đã populate)
+    const customerIdValue = booking.customerId?._id ?? booking.customerId;
+    
+    // Tạo request object giả nếu không có (cho IPN callback)
+    const fakeReq = req || {
+      user: customerIdValue ? { _id: customerIdValue } : null
+    };
 
-  // Nếu booking đang ở pending, chuyển sang confirmed khi thanh toán thành công
-  const nextStatus = booking.status === "pending" ? "confirmed" : booking.status;
-  
-  console.log("🔄 updatePaymentSuccess - Will update status to:", nextStatus);
-  
-  // Sử dụng pushStatusChange để cập nhật status và statusHistory (tự động qua pre-save hook)
-  if (nextStatus !== booking.status) {
-    console.log("📝 updatePaymentSuccess - Status will change, using pushStatusChange");
-    await pushStatusChange({
-      booking,
-      nextStatus,
-      req: fakeReq,
-      action: "payment_success",
-      note: `VNPay thanh toán thành công. Mã giao dịch: ${transactionId || "N/A"}`,
-      mutate: (doc) => {
-        doc.paymentStatus = "paid";
-        doc.depositMethod = "vnpay";
-        doc.depositStatus = doc.depositRequired ? "paid" : doc.depositStatus;
-        doc.depositTxnId = transactionId || doc.depositTxnId;
-      },
-    });
-    console.log("✅ updatePaymentSuccess - pushStatusChange completed");
-  } else {
-    console.log("📝 updatePaymentSuccess - Status unchanged, updating payment info only");
-    // Nếu status không đổi, vẫn cần thêm vào statusHistory để tracking
+    // Giữ nguyên status hiện tại, không tự động chuyển từ pending sang confirmed
+    // Chỉ cập nhật paymentStatus = paid
+    console.log("🔄 updatePaymentSuccess - Keeping status unchanged:", booking.status);
+    console.log("💰 updatePaymentSuccess - Updating payment status to: paid");
+    
     // Set $locals để pre-save hook có thể sử dụng
     booking.$locals = booking.$locals || {};
-    booking.$locals.actorId = booking.customerId?._id ?? booking.customerId ?? null;
+    booking.$locals.actorId = customerIdValue ?? null;
     booking.$locals.statusAction = "payment_success";
     booking.$locals.statusNote = `VNPay thanh toán thành công. Mã giao dịch: ${transactionId || "N/A"}`;
     
-    // Cập nhật payment info
+    // Cập nhật payment info - KHÔNG thay đổi status
     booking.paymentStatus = "paid";
     booking.depositMethod = "vnpay";
     booking.depositStatus = booking.depositRequired ? "paid" : booking.depositStatus;
     booking.depositTxnId = transactionId || booking.depositTxnId;
     
-    // Manually thêm vào statusHistory vì status không đổi nên pre-save hook không chạy
+    // Manually thêm vào statusHistory để tracking thanh toán thành công
+    // Status vẫn giữ nguyên (pending), chỉ ghi lại sự kiện thanh toán
     booking.appendStatusHistory({
-      status: booking.status,
+      status: booking.status, // Giữ nguyên status hiện tại
       action: "payment_success",
       note: `VNPay thanh toán thành công. Mã giao dịch: ${transactionId || "N/A"}`,
-      userId: booking.customerId?._id ?? booking.customerId ?? null,
+      userId: customerIdValue ?? null,
     });
     
     await booking.save();
-    console.log("✅ updatePaymentSuccess - Booking saved with payment info updated");
+    console.log("✅ updatePaymentSuccess - Booking saved with payment info updated, status unchanged:", booking.status);
+    
+    // Reload booking để đảm bảo có dữ liệu mới nhất
+    // Luôn populate lại để đảm bảo có dữ liệu đầy đủ (safe operation)
+    try {
+      await booking.populate([
+        { path: "customerId", select: "name phone email username" },
+        { path: "courtId", select: "name code type basePrice peakPrice images" },
+      ]);
+    } catch (populateError) {
+      console.warn("⚠️ updatePaymentSuccess - Populate warning (non-critical):", populateError?.message);
+      // Không throw lỗi vì populate là optional, booking đã được cập nhật thành công
+    }
+    
+    console.log("✅ updatePaymentSuccess - Final status:", {
+      id: booking._id.toString(),
+      code: booking.code,
+      status: booking.status,
+      paymentStatus: booking.paymentStatus,
+      depositTxnId: booking.depositTxnId,
+    });
+  } catch (error) {
+    console.error("❌ updatePaymentSuccess - Error during update:", error);
+    console.error("❌ updatePaymentSuccess - Error stack:", error?.stack);
+    throw error;
   }
-  
-  // Reload booking để đảm bảo có dữ liệu mới nhất
-  await booking.populate([
-    { path: "customerId", select: "name phone email username" },
-    { path: "courtId", select: "name code type basePrice peakPrice images" },
-  ]);
-  
-  console.log("✅ updatePaymentSuccess - Final status:", {
-    id: booking._id.toString(),
-    code: booking.code,
-    status: booking.status,
-    paymentStatus: booking.paymentStatus,
-    depositTxnId: booking.depositTxnId,
-  });
 };
 
 export const createVnPayPayment = async (req, res, next) => {
@@ -140,35 +135,81 @@ export const createVnPayPayment = async (req, res, next) => {
     }
 
     const amount = Math.max(booking.totals?.total ?? booking.total ?? 0, 0);
-    const createDate = formatVnpDate(new Date());
-    const expireDate = formatVnpDate(new Date(Date.now() + 15 * 60 * 1000));
+    
+    // Validate amount
+    if (amount <= 0) {
+      return res.status(400).json({ message: "Số tiền thanh toán phải lớn hơn 0" });
+    }
 
+    // Format date theo chuẩn VNPay: yyyyMMddHHmmss (GMT+7)
+    const now = new Date();
+    const createDate = formatVnpDate(now);
+    const expireDate = formatVnpDate(new Date(now.getTime() + 15 * 60 * 1000)); // 15 phút sau
+
+    // Lấy IP khách hàng (không được null)
+    const clientIp = getClientIp(req);
+    if (!clientIp || clientIp === "127.0.0.1") {
+      console.warn("⚠️ VNPay - Client IP not detected, using default");
+    }
+
+    // Mã đơn hàng - loại bỏ ký tự đặc biệt nếu có (chỉ giữ chữ và số)
+    const txnRef = booking.code.replace(/[^a-zA-Z0-9]/g, "");
+    
+    // Mô tả đơn hàng - chỉ dùng chữ cái và số (không có ký tự đặc biệt, không có dấu)
+    // VNPay yêu cầu: chỉ chữ cái, số, space (max 255 chars)
+    const orderInfo = `Thanh toan don dat san ${booking.code}`.replace(/[^a-zA-Z0-9\s]/g, "").substring(0, 255);
+    
+    // Xây dựng các tham số theo đúng API VNPay (tên tham số phân biệt chữ hoa/thường)
     let vnpParams = {
       vnp_Version: "2.1.0",
       vnp_Command: "pay",
       vnp_TmnCode: VNPAY_TMN_CODE,
       vnp_Locale: "vn",
       vnp_CurrCode: "VND",
-      vnp_TxnRef: booking.code,
-      vnp_OrderInfo: `Thanh toán đơn đặt sân ${booking.code}`,
-      vnp_OrderType: "other",
-      vnp_Amount: Math.round(amount * 100),
-      vnp_ReturnUrl: VNPAY_RETURN_URL,
-      vnp_IpAddr: getClientIp(req),
-      vnp_CreateDate: createDate,
-      vnp_ExpireDate: expireDate,
+      vnp_TxnRef: txnRef, // Mã đơn hàng duy nhất (không có ký tự đặc biệt)
+      vnp_OrderInfo: orderInfo, // Mô tả đơn hàng (không có ký tự đặc biệt, max 255 chars)
+      vnp_OrderType: "other", // Loại đơn hàng
+      vnp_Amount: Math.round(amount * 100), // Số tiền (PHẢI nhân 100, không có dấu phẩy)
+      vnp_ReturnUrl: VNPAY_RETURN_URL, // URL callback khi thanh toán xong
+      vnp_IpNUrl: VNPAY_IPN_URL, // URL để VNPay gửi callback bất đồng bộ (quan trọng!)
+      vnp_IpAddr: clientIp, // IP khách hàng (không được null)
+      vnp_CreateDate: createDate, // Thời gian tạo đơn (format: yyyyMMddHHmmss, GMT+7)
+      vnp_ExpireDate: expireDate, // Thời gian hết hạn (format: yyyyMMddHHmmss, GMT+7)
     };
 
+    // Thêm bankCode nếu có (để chọn ngân hàng cụ thể)
     if (bankCode) {
       vnpParams.vnp_BankCode = bankCode;
     }
 
+    // Sắp xếp các tham số theo thứ tự alphabet (bắt buộc cho VNPay)
     vnpParams = sortObject(vnpParams);
+    
+    // Tạo chuỗi query string (không encode)
     const signData = querystring.stringify(vnpParams, { encode: false });
+    
+    // Tạo chữ ký HMACSHA512
     const secureHash = createSecureHash(signData, VNPAY_HASH_SECRET);
+    
+    // Thêm chữ ký vào params
     vnpParams.vnp_SecureHash = secureHash;
-
+    
+    // Tạo URL thanh toán
     const paymentUrl = `${VNPAY_PAYMENT_URL}?${querystring.stringify(vnpParams, { encode: false })}`;
+    
+    console.log("🔗 VNPay Payment URL created:", {
+      bookingCode: booking.code,
+      amount,
+      amountVnp: vnpParams.vnp_Amount,
+      txnRef: vnpParams.vnp_TxnRef,
+      orderInfo: vnpParams.vnp_OrderInfo,
+      createDate: vnpParams.vnp_CreateDate,
+      expireDate: vnpParams.vnp_ExpireDate,
+      clientIp: vnpParams.vnp_IpAddr,
+      returnUrl: vnpParams.vnp_ReturnUrl,
+      ipnUrl: vnpParams.vnp_IpNUrl,
+    });
+    
     return res.json({ paymentUrl });
   } catch (error) {
     return next(error);
@@ -178,12 +219,32 @@ export const createVnPayPayment = async (req, res, next) => {
 const verifyVnpParams = (query) => {
   const params = { ...query };
   const secureHash = params.vnp_SecureHash;
+  const secureHashType = params.vnp_SecureHashType || "SHA512";
+  
+  // Loại bỏ các field không tham gia tính chữ ký
   delete params.vnp_SecureHash;
   delete params.vnp_SecureHashType;
+  
+  // Sắp xếp params theo alphabet (giống như khi tạo)
   const sorted = sortObject(params);
+  
+  // Tạo chuỗi query string (không encode)
   const signData = querystring.stringify(sorted, { encode: false });
+  
+  // Tạo chữ ký để so sánh (VNPay sử dụng HMACSHA512)
   const checkSum = createSecureHash(signData, VNPAY_HASH_SECRET);
-  return { isValid: secureHash === checkSum, params };
+  
+  const isValid = secureHash === checkSum;
+  
+  if (!isValid) {
+    console.warn("⚠️ VNPay Signature verification failed:", {
+      received: secureHash?.substring(0, 20) + "...",
+      calculated: checkSum?.substring(0, 20) + "...",
+      signData: signData.substring(0, 100) + "...",
+    });
+  }
+  
+  return { isValid, params };
 };
 
 export const vnPayReturn = async (req, res) => {
@@ -233,16 +294,30 @@ export const confirmManualPayment = async (req, res, next) => {
 
     console.log("🔔 Manual Payment Confirmation - bookingId:", bookingId, "transactionId:", transactionId);
 
-    const booking = await Booking.findById(bookingId);
+    // Populate customerId để kiểm tra quyền
+    const booking = await Booking.findById(bookingId).populate("customerId", "name email");
     if (!booking) {
       console.error("❌ Manual Payment - Booking not found:", bookingId);
       return res.status(404).json({ message: "Không tìm thấy booking" });
     }
 
-    // Kiểm tra quyền
+    // Kiểm tra quyền - chỉ kiểm tra nếu có user
+    if (!req.user) {
+      console.error("❌ Manual Payment - No user in request");
+      return res.status(401).json({ message: "Bạn cần đăng nhập để xác nhận thanh toán" });
+    }
+
     const isOwner = isBookingOwner(booking, req.user);
     const isAdmin = req.user?.role === USER_ROLES.ADMIN;
     if (!isOwner && !isAdmin) {
+      console.error("❌ Manual Payment - Permission denied:", { 
+        bookingId, 
+        userId: req.user?._id,
+        userRole: req.user?.role,
+        customerId: booking.customerId?._id ?? booking.customerId,
+        isOwner,
+        isAdmin,
+      });
       return res.status(403).json({ message: "Bạn không có quyền xác nhận thanh toán booking này" });
     }
 
@@ -251,21 +326,63 @@ export const confirmManualPayment = async (req, res, next) => {
     }
 
     console.log("💰 Manual Payment - Confirming payment for booking:", booking.code);
-    await updatePaymentSuccess(booking, transactionId || `MANUAL_${Date.now()}`, req);
     
-    await booking.populate([
-      { path: "customerId", select: "name phone email username" },
-      { path: "courtId", select: "name code type basePrice peakPrice images" },
-    ]);
-
-    console.log("✅ Manual Payment - Payment confirmed successfully");
-    return res.json({
-      message: "Xác nhận thanh toán thành công",
-      data: booking,
-    });
+    // Cập nhật payment status
+    try {
+      await updatePaymentSuccess(booking, transactionId || `MANUAL_${Date.now()}`, req);
+    } catch (updateError) {
+      console.error("❌ Manual Payment - Error updating payment:", updateError);
+      console.error("❌ Manual Payment - Update error stack:", updateError?.stack);
+      throw updateError;
+    }
+    
+    // Reload và populate đầy đủ để trả về
+    try {
+      // Reload booking từ database để có dữ liệu mới nhất
+      const updatedBooking = await Booking.findById(bookingId);
+      if (updatedBooking) {
+        await updatedBooking.populate([
+          { path: "customerId", select: "name phone email username" },
+          { path: "courtId", select: "name code type basePrice peakPrice images" },
+        ]);
+        console.log("✅ Manual Payment - Payment confirmed successfully");
+        return res.status(200).json({
+          success: true,
+          message: "Xác nhận thanh toán thành công",
+          data: updatedBooking,
+        });
+      } else {
+        // Fallback: sử dụng booking hiện tại nếu không reload được
+        console.warn("⚠️ Manual Payment - Could not reload booking, using current");
+        return res.status(200).json({
+          success: true,
+          message: "Xác nhận thanh toán thành công",
+          data: booking,
+        });
+      }
+    } catch (populateError) {
+      console.warn("⚠️ Manual Payment - Populate error (non-critical):", populateError?.message);
+      // Vẫn trả về success vì payment đã được cập nhật
+      return res.status(200).json({
+        success: true,
+        message: "Xác nhận thanh toán thành công",
+        data: booking,
+      });
+    }
   } catch (error) {
     console.error("❌ Manual Payment - Error:", error);
-    return next(error);
+    console.error("❌ Manual Payment - Error stack:", error?.stack);
+    console.error("❌ Manual Payment - Error message:", error?.message);
+    
+    // Trả về lỗi với format đúng
+    const statusCode = error?.status || error?.statusCode || 500;
+    const message = error?.message || "Có lỗi xảy ra khi xác nhận thanh toán";
+    
+    return res.status(statusCode).json({
+      success: false,
+      message,
+      error: process.env.NODE_ENV === 'development' ? error?.stack : undefined,
+    });
   }
 };
 

@@ -50,6 +50,11 @@ const BookingSchema = new Schema({
   checkoutAt: { type: Date },
   notes: { type: String },
   cancelReason: { type: String, default: "" },
+  // Thông tin hoàn tiền
+  refundAccountNumber: { type: String },
+  refundAccountName: { type: String },
+  refundBankName: { type: String },
+  refundNote: { type: String },
   adminNotes: [
     {
       _id: false,

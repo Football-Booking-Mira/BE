@@ -59,6 +59,11 @@ export const bookingValidation = {
     checkoutAt: Joi.date().allow(null),
     notes: Joi.string().max(1000).allow("", null),
     cancelReason: Joi.string().max(500).allow("", null),
+    // Thông tin hoàn tiền
+    refundAccountNumber: Joi.string().max(50).allow("", null),
+    refundAccountName: Joi.string().max(100).allow("", null),
+    refundBankName: Joi.string().max(100).allow("", null),
+    refundNote: Joi.string().max(500).allow("", null),
   }),
 
   update: Joi.object({

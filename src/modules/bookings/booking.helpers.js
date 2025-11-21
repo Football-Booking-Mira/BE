@@ -125,6 +125,11 @@ export function composeBookingDetail(bookingDoc, options = {}) {
       ? bookingDoc.code
       : null,
     cancelReason: bookingDoc.cancelReason || "",
+    // Thông tin hoàn tiền
+    refundAccountNumber: bookingDoc.refundAccountNumber || null,
+    refundAccountName: bookingDoc.refundAccountName || null,
+    refundBankName: bookingDoc.refundBankName || null,
+    refundNote: bookingDoc.refundNote || null,
     canCancel,
     cancelPolicy: {
       hoursBeforeStart: CANCEL_BEFORE_HOURS,
