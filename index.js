@@ -3,7 +3,7 @@ import cors from 'cors';
 import routes from './src/routes/index.js';
 import { notFoundMiddleware } from './src/common/middlewares/notfound.middleware.js';
 import { errorMiddleware } from './src/common/middlewares/error.middleware.js';
-import { FONT_END_URL, HOST, PORT } from './src/common/config/environment.js';
+import { FRONT_END_URL, HOST, PORT } from './src/common/config/environment.js';
 import { connectDB } from './src/common/config/database.js';
 import morgan from 'morgan';
 import setupSwagger from './src/common/config/swagger-config.js';
@@ -31,7 +31,7 @@ app.use(errorMiddleware);
 const server = app.listen(PORT, () => {
     console.log('API RUNNING');
     console.log(`API: http://${HOST}:${PORT}/api`);
-    console.log(`Swagger at: http://${HOST}:${PORT}/api-docs`);
+console.log(`Swagger at: http://${HOST}:${PORT}/api-docs`);
 });
 
 process.on('unhandledRejection', (error) => {

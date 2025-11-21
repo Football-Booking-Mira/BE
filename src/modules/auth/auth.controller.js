@@ -8,7 +8,7 @@ import {
   verifyResetTokenService,
   verifyEmailService,
 } from "./auth.service.js";
-import { FONT_END_URL } from "../../common/config/environment.js";
+import { FRONT_END_URL } from "../../common/config/environment.js";
 import sendMail from "../../utils/sendEmail.js";
 import { htmlForgot, htmlVerify } from "../../utils/renderHMTLTemp.js";
 import createResponse from "../../utils/responses.js";
@@ -16,7 +16,7 @@ import createResponse from "../../utils/responses.js";
 export const register = handleAsync(async (req, res, next) => {
   const response = await registerService(req.body);
 
-  const link = `${FONT_END_URL}/verify-email?token=${response.verificationToken}`;
+  const link = `${FRONT_END_URL}/verify-email?token=${response.verificationToken}`;
   await sendMail({
     to: response.user.email,
     subject: "Xác thực email để kích hoạt tài khoản",
@@ -47,7 +47,7 @@ export const login = handleAsync(async (req, res, next) => {
 export const forgotPassword = handleAsync(async (req, res, next) => {
   const { email } = req.body;
   const result = await forgotPasswordService(email);
-  const link = `${FONT_END_URL}/verify?token=${result.resetToken}`;
+  const link = `${FRONT_END_URL}/verify?token=${result.resetToken}`;
   await sendMail({
     to: email,
     subject: "Xác nhận đặt lại mật khẩu",

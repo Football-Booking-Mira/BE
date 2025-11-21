@@ -49,6 +49,26 @@ const BookingSchema = new Schema({
   checkinAt: { type: Date },
   checkoutAt: { type: Date },
   notes: { type: String },
+  cancelReason: { type: String, default: "" },
+  adminNotes: [
+    {
+      _id: false,
+      note: { type: String, required: true },
+      createdAt: { type: Date, default: Date.now },
+      createdBy: { type: ObjectId, ref: 'User', default: null },
+      pinned: { type: Boolean, default: false },
+    },
+  ],
+  statusHistory: [
+    {
+      _id: false,
+      status: { type: String, enum: BOOKING_STATUS, required: true },
+      action: { type: String },
+      note: { type: String },
+      changedAt: { type: Date, default: Date.now },
+      changedBy: { type: ObjectId, ref: 'User', default: null },
+    },
+  ],
 }, {
   timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' },
 });
@@ -119,6 +139,51 @@ BookingSchema.methods.markCheckout = async function () {
   this.status = 'completed';
   await this.save();
 };
+
+BookingSchema.methods.appendStatusHistory = function ({ status, action = '', note = '', userId = null }) {
+  const entry = {
+    status,
+    action,
+    note,
+    changedAt: new Date(),
+    changedBy: userId,
+  };
+  if (!Array.isArray(this.statusHistory)) {
+    this.statusHistory = [];
+  }
+  this.statusHistory.push(entry);
+};
+
+BookingSchema.methods.addAdminNote = function ({ note, userId = null, pinned = false }) {
+  if (!note) return;
+  const entry = {
+    note,
+    createdAt: new Date(),
+    createdBy: userId,
+    pinned,
+  };
+  if (!Array.isArray(this.adminNotes)) {
+    this.adminNotes = [];
+  }
+  this.adminNotes.push(entry);
+};
+
+BookingSchema.pre('save', function (next) {
+  try {
+    if (this.isModified('status')) {
+      const locals = this.$locals || {};
+      this.appendStatusHistory({
+        status: this.status,
+        action: locals.statusAction || (this.isNew ? 'create' : 'status_change'),
+        note: locals.statusNote ?? this.cancelReason ?? '',
+        userId: locals.actorId || null,
+      });
+    }
+    return next();
+  } catch (err) {
+    return next(err);
+  }
+});
 
 const Booking = mongoose.model('Booking', BookingSchema);
 export default Booking;

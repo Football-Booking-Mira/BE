@@ -5,7 +5,7 @@
     "description": "API By Trịnh Quốc Hùng",
     "version": "1.0.0"
   },
-  "host": "localhost:8000",
+  "host": "localhost:3000",
   "basePath": "/api",
   "schemes": ["http", "https"],
   "securityDefinitions": {

@@ -58,6 +58,7 @@ export const bookingValidation = {
     checkinAt: Joi.date().allow(null),
     checkoutAt: Joi.date().allow(null),
     notes: Joi.string().max(1000).allow("", null),
+    cancelReason: Joi.string().max(500).allow("", null),
   }),
 
   update: Joi.object({
@@ -73,6 +74,7 @@ export const bookingValidation = {
     depositStatus: Joi.string().valid("pending", "paid", "refunded", "forfeited"),
     depositTxnId: Joi.string().allow("", null),
     notes: Joi.string().max(1000).allow("", null),
+    cancelReason: Joi.string().max(500).allow("", null),
   }),
 
   checkin: Joi.object({

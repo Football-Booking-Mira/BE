@@ -1,5 +1,6 @@
 import createResponse from "../../utils/responses.js";
-
+import { verifyToken } from "../../modules/auth/auth.utils.js";
+import { USER_ROLES } from "../constants/enums.js";
 
 const getTokenFromHeader = (req) => {
   const authHeader = req.headers.authorization || req.headers.Authorization;
@@ -20,7 +21,6 @@ export const authenticate = (req, res, next) => {
         .json(createResponse(false, 401, "Unauthorized: token missing"));
     }
 
-    const secret = JWT_ACCESS_SECRECT || "default_secret";
     const payload = verifyToken(token);
     req.user = payload;
     return next();
