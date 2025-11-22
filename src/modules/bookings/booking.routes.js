@@ -5,6 +5,7 @@ import {
     adminCheckinBooking,
     adminCompleteBooking,
     adminConfirmBooking,
+    adminRefundBooking,
     cancelBooking,
     checkinBooking,
     checkoutBooking,
@@ -32,6 +33,7 @@ routesBookings.post('/:id/admin/confirm', authorize(USER_ROLES.ADMIN), adminConf
 routesBookings.post('/:id/admin/cancel', authorize(USER_ROLES.ADMIN), adminCancelBooking);
 routesBookings.post('/:id/admin/checkin', authorize(USER_ROLES.ADMIN), adminCheckinBooking);
 routesBookings.post('/:id/admin/complete', authorize(USER_ROLES.ADMIN), adminCompleteBooking);
+routesBookings.post('/:id/admin/refund', authorize(USER_ROLES.ADMIN), adminRefundBooking);
 routesBookings.post('/:id/admin/notes', authorize(USER_ROLES.ADMIN), adminAddNote);
 routesBookings.get('/:id', getBookingById);
 routesBookings.put('/:id', authorize(USER_ROLES.ADMIN), updateBooking);

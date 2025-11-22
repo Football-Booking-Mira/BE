@@ -1,6 +1,9 @@
 import Booking from "./booking.models.js";
 import mongoose from "mongoose";
 import { bookingValidation } from "./booking.schema.js";
+import sendMail from "../../utils/sendEmail.js";
+import { htmlRefund } from "../../utils/renderHMTLTemp.js";
+import { FRONT_END_URL } from "../../common/config/environment.js";
 import {
   generateBookingCode,
   isBookingOwner,
@@ -685,5 +688,116 @@ export async function updatePaymentStatusService(id, body) {
   }
 
   return booking;
+}
+
+export async function adminRefundBookingService(id, body, req) {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw {
+      status: 400,
+      message: "ID không hợp lệ",
+    };
+  }
+
+  const { note = "" } = body || {};
+
+  const booking = await Booking.findById(id);
+  if (!booking) {
+    throw {
+      status: 404,
+      message: "Không tìm thấy booking",
+    };
+  }
+
+  if (booking.status !== "cancelled") {
+    throw {
+      status: 400,
+      message: "Chỉ có thể hoàn tiền cho đơn đã hủy (CANCELLED)",
+    };
+  }
+
+  if (booking.refundStatus === "refunded") {
+    throw {
+      status: 400,
+      message: "Đơn này đã được hoàn tiền rồi",
+    };
+  }
+
+  // Cập nhật refund status và booking status
+  await pushStatusChange({
+    booking,
+    nextStatus: "cancelled_refunded",
+    req,
+    action: "admin_refund",
+    note: note || "Admin đã xử lý hoàn tiền",
+    mutate: (doc) => {
+      doc.refundStatus = "refunded";
+      doc.paymentStatus = "refunded";
+      if (doc.depositStatus === "paid") {
+        doc.depositStatus = "refunded";
+      }
+    },
+  });
+
+  await booking.populate([
+    { path: "customerId", select: "name phone email username" },
+    { path: "courtId", select: "name code type basePrice peakPrice images" },
+    { path: "statusHistory.changedBy", select: "name username email role" },
+    { path: "adminNotes.createdBy", select: "name username email role" },
+  ]);
+
+  // Gửi email thông báo hoàn tiền cho user
+  if (booking.customerId && typeof booking.customerId === "object" && booking.customerId.email) {
+    try {
+      const customer = booking.customerId;
+      const formatCurrency = (value) => {
+        return new Intl.NumberFormat("vi-VN", {
+          style: "currency",
+          currency: "VND",
+        }).format(value || 0);
+      };
+
+      const bookingUrl = `${FRONT_END_URL}/bookings/${booking._id}`;
+      const refundAmount = formatCurrency(booking.total);
+      const accountNumber = booking.refundAccountNumber || "N/A";
+      const bankName = booking.refundBankName || "N/A";
+
+      console.log(`[REFUND EMAIL] Preparing to send refund notification:`);
+      console.log(`[REFUND EMAIL] - To: ${customer.email}`);
+      console.log(`[REFUND EMAIL] - Booking: #${booking.code}`);
+      console.log(`[REFUND EMAIL] - Amount: ${refundAmount}`);
+      console.log(`[REFUND EMAIL] - Account: ${accountNumber}`);
+      console.log(`[REFUND EMAIL] - Bank: ${bankName}`);
+      console.log(`[REFUND EMAIL] - Booking URL: ${bookingUrl}`);
+      
+      const emailResult = await sendMail({
+        to: customer.email,
+        subject: `Hoàn tiền thành công - Đơn #${booking.code}`,
+        html: htmlRefund(
+          customer.email,
+          customer.name || customer.username || "Khách hàng",
+          booking.code,
+          refundAmount,
+          accountNumber,
+          bankName,
+          bookingUrl
+        ),
+      });
+
+      console.log(`[REFUND EMAIL] Email sent successfully to ${customer.email}`, emailResult.messageId || "OK");
+    } catch (emailError) {
+      console.error("[REFUND EMAIL] Error sending refund notification email:", emailError);
+      console.error("[REFUND EMAIL] Error details:", {
+        message: emailError.message,
+        stack: emailError.stack,
+        bookingCode: booking.code,
+        customerEmail: booking.customerId?.email,
+      });
+      // Không throw error để không ảnh hưởng đến quá trình hoàn tiền
+    }
+  } else {
+    console.warn(`[REFUND EMAIL] Cannot send email: customerId is ${booking.customerId ? typeof booking.customerId : 'null'}, email: ${booking.customerId?.email || 'N/A'}`);
+  }
+
+  return composeBookingDetail(booking, { includeAdminFields: true });
 }
 

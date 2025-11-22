@@ -40,12 +40,16 @@ export const bookingValidation = {
     total: Joi.number().min(0).optional(),
 
     status: Joi.string()
-      .valid("pending", "confirmed", "in_use", "completed", "cancelled", "no_show")
+      .valid("pending", "confirmed", "in_use", "completed", "cancelled", "cancelled_refunded", "no_show")
       .default("pending"),
 
     paymentStatus: Joi.string()
       .valid("unpaid", "partial", "paid", "refunded")
       .default("unpaid"),
+
+    refundStatus: Joi.string()
+      .valid("pending", "refunded")
+      .allow(null, ""),
 
     depositRequired: Joi.boolean().default(false),
     depositAmount: Joi.number().min(0).default(0),
@@ -73,13 +77,19 @@ export const bookingValidation = {
       "in_use",
       "completed",
       "cancelled",
+      "cancelled_refunded",
       "no_show"
     ),
     paymentStatus: Joi.string().valid("unpaid", "partial", "paid", "refunded"),
+    refundStatus: Joi.string().valid("pending", "refunded").allow(null, ""),
     depositStatus: Joi.string().valid("pending", "paid", "refunded", "forfeited"),
     depositTxnId: Joi.string().allow("", null),
     notes: Joi.string().max(1000).allow("", null),
     cancelReason: Joi.string().max(500).allow("", null),
+  }),
+
+  refund: Joi.object({
+    note: Joi.string().max(500).allow("", null),
   }),
 
   checkin: Joi.object({

@@ -123,6 +123,67 @@ export function renderEmailTemplate(params) {
     `;
   }
 
+  if (params.type === "refund") {
+    return `
+    <!doctype html>
+    <html lang="vi">
+      <head>
+        <meta charset="utf-8" />
+        <title>Hoàn tiền thành công</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+      </head>
+      <body style="margin:0;padding:0;background:#f5f7fb;">
+        <table role="presentation" width="100%" style="background:#f5f7fb;">
+          <tr><td align="center" style="padding:24px;">
+            <table role="presentation" style="max-width:600px;width:100%;">
+              <tr>
+                <td align="center">
+                  <a href="${params.homepageUrl}">
+                    <img src="${params.logoUrl}" width="120" style="display:block;margin:0 auto;border:0;">
+                  </a>
+                </td>
+              </tr>
+              <tr>
+                <td style="background:#fff;border-radius:12px;padding:28px 24px;color:#111827;border:1px solid #e5e7eb;">
+                  <h1 style="font-size:20px;margin:0 0 12px;">✅ Hoàn tiền thành công</h1>
+                  <p style="font-size:14px;color:#4b5563;">
+                    Xin chào ${params.userName},
+                  </p>
+                  <p style="font-size:14px;color:#4b5563;">
+                    Chúng tôi xin thông báo rằng khoản hoàn tiền cho đơn đặt sân <strong>#${params.bookingCode}</strong> đã được xử lý thành công.
+                  </p>
+                  <div style="background:#f0fdf4;border-left:4px solid #10b981;padding:16px;border-radius:4px;margin:16px 0;">
+                    <p style="font-size:14px;color:#166534;margin:0 0 8px;"><strong>Thông tin hoàn tiền:</strong></p>
+                    <p style="font-size:13px;color:#166534;margin:4px 0;">Số tiền: <strong>${params.amount}</strong></p>
+                    <p style="font-size:13px;color:#166534;margin:4px 0;">Tài khoản: <strong>${params.accountNumber}</strong></p>
+                    <p style="font-size:13px;color:#166534;margin:4px 0;">Ngân hàng: <strong>${params.bankName}</strong></p>
+                  </div>
+                  <p style="font-size:14px;color:#4b5563;">
+                    Tiền sẽ được chuyển vào tài khoản của bạn trong vòng 1-3 ngày làm việc. Vui lòng kiểm tra tài khoản ngân hàng.
+                  </p>
+                  <p style="font-size:14px;color:#4b5563;">
+                    Nếu có bất kỳ thắc mắc nào, vui lòng liên hệ <a href="${params.supportUrl}" style="color:#2563eb;">đội hỗ trợ</a> của chúng tôi.
+                  </p>
+                  <a href="${params.bookingUrl}"
+                     style="display:inline-block;margin:16px 0;padding:14px 28px;background:#10b981;color:#fff;
+                     border-radius:8px;font-weight:600;text-decoration:none;font-size:16px;">
+                    XEM CHI TIẾT ĐƠN
+                  </a>
+                </td>
+              </tr>
+              <tr>
+                <td style="text-align:center;padding:16px 8px;color:#9ca3af;font-size:12px;">
+                  © ${year} ${params.companyName} · <a href="${params.supportUrl}" style="color:#6b7280;">Hỗ trợ</a>
+                </td>
+              </tr>
+            </table>
+          </td></tr>
+        </table>
+      </body>
+    </html>
+    `;
+  }
+
   return `
   <!doctype html>
   <html lang="vi">
@@ -197,3 +258,21 @@ export const htmlVerify = (email, name, link) =>
   base("verify-email", email, name, link);
 
 export const htmlReset = (email, name) => base("reset-success", email, name);
+
+export const htmlRefund = (email, name, bookingCode, amount, accountNumber, bankName, bookingUrl) =>
+  renderEmailTemplate({
+    type: "refund",
+    productName: "FPOLY",
+    companyName: "FPT Polytechnic",
+    email,
+    userName: name,
+    logoUrl: "https://logo.png",
+    homepageUrl: bookingUrl || "https://example.com",
+    supportUrl: "https://example.com/support",
+    bookingCode,
+    amount,
+    accountNumber,
+    bankName,
+    bookingUrl: bookingUrl || "https://example.com",
+    year: new Date().getFullYear(),
+  });

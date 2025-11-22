@@ -48,6 +48,12 @@ export const STATUS_HINTS = {
     actions: ["Xem lý do huỷ", "Theo dõi trạng thái hoàn tiền"],
     restrictions: ["Không thể thao tác thêm"],
   },
+  cancelled_refunded: {
+    display: "CANCELLED_REFUNDED",
+    title: "Đơn đã hủy và đã hoàn tiền",
+    actions: ["Xem lý do huỷ", "Xem thông tin hoàn tiền"],
+    restrictions: ["Không thể thao tác thêm"],
+  },
   no_show: {
     display: "NO_SHOW",
     title: "Khách không đến",
@@ -103,6 +109,15 @@ export const ADMIN_ACTION_HINTS = {
     canViewReceipt: true,
   },
   cancelled: {
+    canConfirm: false,
+    canCancel: false,
+    canAddNote: true,
+    canCheckin: false,
+    canComplete: false,
+    canRefund: true,
+    canViewReceipt: false,
+  },
+  cancelled_refunded: {
     canConfirm: false,
     canCancel: false,
     canAddNote: true,

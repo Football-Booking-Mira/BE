@@ -138,7 +138,7 @@ export const getAvailableCourts = handleAsync(async (req, res, next) => {
     // Tìm các lịch trùng giờ trong ngày đó (loại bỏ các booking đã hủy)
     const overlapQuery = {
         date: { $gte: day, $lt: nextDay },
-        status: { $ne: 'cancelled' },
+        status: { $nin: ['cancelled', 'cancelled_refunded'] },
         $and: [{ startMinute: { $lt: endMinute } }, { endMinute: { $gt: startMinute } }],
     };
 

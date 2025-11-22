@@ -126,6 +126,7 @@ export function composeBookingDetail(bookingDoc, options = {}) {
       : null,
     cancelReason: bookingDoc.cancelReason || "",
     // Thông tin hoàn tiền
+    refundStatus: bookingDoc.refundStatus || null,
     refundAccountNumber: bookingDoc.refundAccountNumber || null,
     refundAccountName: bookingDoc.refundAccountName || null,
     refundBankName: bookingDoc.refundBankName || null,

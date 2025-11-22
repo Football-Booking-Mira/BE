@@ -16,6 +16,7 @@ import {
   checkoutBookingService,
   cancelBookingService,
   updatePaymentStatusService,
+  adminRefundBookingService,
 } from "./booking.service.js";
 
 // ==================== User Routes ====================
@@ -326,6 +327,25 @@ export const updatePaymentStatus = async (req, res) => {
     });
   } catch (err) {
     console.error("Error updatePaymentStatus:", err);
+    const status = err.status || 500;
+    const message = err.message || "Lỗi server";
+    return res.status(status).json({
+      message,
+      ...(err.error && { error: err.error }),
+    });
+  }
+};
+
+export const adminRefundBooking = async (req, res) => {
+  try {
+    if (!ensureAdmin(req, res)) return;
+    const data = await adminRefundBookingService(req.params.id, req.body, req);
+    return res.status(200).json({
+      message: "Đã xử lý hoàn tiền thành công",
+      data,
+    });
+  } catch (err) {
+    console.error("Error adminRefundBooking:", err);
     const status = err.status || 500;
     const message = err.message || "Lỗi server";
     return res.status(status).json({

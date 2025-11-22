@@ -7,8 +7,9 @@ const {
   Types: { ObjectId }
 } = mongoose;
 
-const BOOKING_STATUS = ['pending', 'confirmed', 'in_use', 'completed', 'cancelled', 'no_show'];
+const BOOKING_STATUS = ['pending', 'confirmed', 'in_use', 'completed', 'cancelled', 'cancelled_refunded', 'no_show'];
 const PAYMENT_STATUS = ['unpaid', 'partial', 'paid', 'refunded'];
+const REFUND_STATUS = ['pending', 'refunded'];
 const DEPOSIT_STATUS = ['pending', 'paid', 'refunded', 'forfeited'];
 const PAYMENT_METHOD = ['cash', 'transfer', 'momo', 'vnpay', 'qr'];
 
@@ -39,6 +40,7 @@ const BookingSchema = new Schema({
 
   status: { type: String, enum: BOOKING_STATUS, default: 'pending', required: true },
   paymentStatus: { type: String, enum: PAYMENT_STATUS, default: 'unpaid', required: true },
+  refundStatus: { type: String, enum: REFUND_STATUS, default: null },
 
   depositRequired: { type: Boolean, default: false, required: true },
   depositAmount: { type: Number, default: 0, required: true },
@@ -127,7 +129,7 @@ BookingSchema.statics.isSlotAvailable = async function (courtId, date, newStartM
   };
 
   if (excludeBookingId) query._id = { $ne: excludeBookingId };
-  query.status = { $ne: 'cancelled' };
+  query.status = { $nin: ['cancelled', 'cancelled_refunded'] };
 
   const overlapping = await this.findOne(query).lean().exec();
   return !Boolean(overlapping);
