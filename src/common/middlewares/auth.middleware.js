@@ -23,9 +23,9 @@ export const authenticate = (req, res, next) => {
     }
 
     try {
-        console.log('🔐 Verifying token:', token.slice(0, 30) + '...');
+        //console.log('Verifying token:', token.slice(0, 30) + '...');
         const payload = verifyToken(token); // { _id, role, iat, exp }
-        console.log('✅ Token payload:', payload);
+        //  console.log('Token payload:', payload);
         req.user = payload;
         return next();
     } catch (error) {
