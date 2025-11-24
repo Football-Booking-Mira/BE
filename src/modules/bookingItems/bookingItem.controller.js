@@ -1,4 +1,3 @@
-// src/modules/bookingItems/bookingItem.controller.js
 import handleAsync from '../../utils/handleAsync.js';
 import createError from '../../utils/error.js';
 import createResponse from '../../utils/responses.js';
@@ -6,7 +5,7 @@ import { BOOKING_STATUS, USER_ROLES } from '../../common/constants/enums.js';
 import Booking from '../bookings/booking.models.js';
 import BookingItem from './bookingItem.models.js';
 
-//  LẤY THIẾT BỊ THEO BOOKING
+//* Lấy thiết bị theo booking
 export const getBookingItems = handleAsync(async (req, res, next) => {
     const { bookingId } = req.params;
 
@@ -14,7 +13,9 @@ export const getBookingItems = handleAsync(async (req, res, next) => {
     if (!booking) return next(createError(404, 'Không tìm thấy booking!'));
 
     const user = req.user;
-    // User thường chỉ xem được đơn của chính mình, admin xem được tất cả
+
+    //* User thường: chỉ xem được đơn của chính mình
+    //* Admin: xem được tất cả
     if (user.role !== USER_ROLES.ADMIN && String(booking.customerId) !== String(user._id)) {
         return next(createError(403, 'Bạn không có quyền xem thiết bị của đơn này!'));
     }
@@ -26,10 +27,10 @@ export const getBookingItems = handleAsync(async (req, res, next) => {
     return res.json(createResponse(true, 200, 'Lấy danh sách thiết bị thành công!', items));
 });
 
-//  ADMIN CẬP NHẬT THIẾT BỊ CHO BOOKING
+//*  ADMIN CẬP NHẬT THIẾT BỊ CHO BOOKING
 export const upsertBookingItems = handleAsync(async (req, res, next) => {
     const { bookingId } = req.params;
-    const { items } = req.body;
+    const { items } = req.body; //  validate zod
 
     const booking = await Booking.findById(bookingId);
     if (!booking) return next(createError(404, 'Không tìm thấy booking!'));
@@ -41,32 +42,19 @@ export const upsertBookingItems = handleAsync(async (req, res, next) => {
         );
     }
 
-    if (!Array.isArray(items)) {
-        return next(createError(400, 'Danh sách thiết bị không hợp lệ (cần là mảng)!'));
-    }
+    const inputItems = Array.isArray(items) ? items : [];
 
-    // Lọc và chuẩn hoá dữ liệu đầu vào
-    const validItems = items
-        .filter((i) => i && i.equipmentId && i.mode && i.qty && i.price >= 0)
-        .map((i) => ({
-            equipmentId: i.equipmentId,
-            mode: i.mode, // 'rent' | 'sell'
-            qty: Number(i.qty),
-            price: Number(i.price),
-        }))
-        .filter((i) => ['rent', 'sell'].includes(i.mode) && i.qty > 0 && !Number.isNaN(i.price));
-
-    // Xoá hết items cũ
+    // Xóa hết items cũ
     await BookingItem.deleteMany({ bookingId });
 
     let createdItems = [];
     let equipmentTotal = 0;
 
-    if (validItems.length > 0) {
-        const docs = validItems.map((i) => ({
+    if (inputItems.length > 0) {
+        const docs = inputItems.map((i) => ({
             bookingId,
             equipmentId: i.equipmentId,
-            mode: i.mode,
+            mode: i.mode, // 'rent' | 'sell'
             qty: i.qty,
             price: i.price,
             subtotal: i.qty * i.price,
@@ -76,7 +64,7 @@ export const upsertBookingItems = handleAsync(async (req, res, next) => {
         equipmentTotal = createdItems.reduce((sum, it) => sum + it.subtotal, 0);
     }
 
-    // Cập nhật tổng tiền thiết bị + tổng tiền booking
+    //* Cập nhật tổng tiền thiết bị + tổng tiền booking
     booking.equipmentTotal = equipmentTotal;
     booking.total = (booking.fieldAmount || 0) + equipmentTotal - (booking.discountTotal || 0);
     booking.updatedAt = new Date();
