@@ -1,5 +1,10 @@
-import { Router } from 'express';
-import { createInvoice, getInvoiceById, getInvoices, updateInvoiceStatus } from './invoice.controller.js';
+import { Router } from "express";
+import {
+  createInvoice,
+  getInvoiceById,
+  getInvoices,
+  updateInvoiceStatus,
+} from "./invoice.controller.js";
 
 const routesInvoices = Router();
 
