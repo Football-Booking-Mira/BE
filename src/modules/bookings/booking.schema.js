@@ -5,15 +5,25 @@ export const bookingSchema = z
     .object({
         courtId: z.string().min(1, 'Vui lòng chọn sân!'),
         customerId: z.string().optional(),
-        date: z
-            .string()
-            .refine((val) => !isNaN(Date.parse(val)), { message: 'Ngày đặt không hợp lệ!' }),
+        date: z.string().refine((val) => !isNaN(Date.parse(val)), {
+            message: 'Ngày đặt không hợp lệ!',
+        }),
         startTime: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Định dạng giờ phải là HH:mm'),
         endTime: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Định dạng giờ phải là HH:mm'),
         paymentMethod: z.enum([PAYMENT_METHOD.VNPAY, PAYMENT_METHOD.CASH], {
             required_error: 'Vui lòng chọn phương thức thanh toán!',
         }),
         note: z.string().max(500).optional(),
+        customerInfo: z
+            .object({
+                name: z.string().trim().min(1, 'Vui lòng nhập họ và tên!'),
+                phone: z
+                    .string()
+                    .trim()
+                    .regex(/^\d{10}$/, 'Số điện thoại phải gồm đúng 10 chữ số!'),
+                email: z.string().trim().email('Email không hợp lệ!'),
+            })
+            .optional(), // để admin tạo offline không bắt buộc gửi
     })
     .superRefine((data, ctx) => {
         const [sh, sm] = data.startTime.split(':').map(Number);
