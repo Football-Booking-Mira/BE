@@ -1,4 +1,9 @@
-import { BOOKING_STATUS, PAYMENT_STATUS } from '../../common/constants/enums.js';
+import {
+    BOOKING_STATUS,
+    PAYMENT_STATUS,
+    PAYMENT_METHOD,
+    DEPOSIT_STATUS,
+} from '../../common/constants/enums.js';
 import crypto from 'crypto';
 import qs from 'qs';
 import Booking from '../bookings/booking.models.js';
@@ -9,6 +14,11 @@ import {
     VNP_RETURN_URL,
     FRONT_END_URL,
 } from '../../common/config/environment.js';
+
+// Tỉ lệ cọc so với TIỀN SÂN
+// 1   = thanh toán FULL tiền sân
+// 0.3 = cọc 30% tiền sân
+const DEPOSIT_RATE = 1;
 
 function sortObject(obj) {
     const sorted = {};
@@ -21,6 +31,9 @@ function sortObject(obj) {
     return sorted;
 }
 
+// ==============================
+// Tạo URL thanh toán VNPAY (tiền sân)
+// ==============================
 export const createVnpayPayment = async (req, res, next) => {
     try {
         const { bookingId } = req.body;
@@ -33,12 +46,31 @@ export const createVnpayPayment = async (req, res, next) => {
             return res.status(404).json({ success: false, message: 'Không tìm thấy booking' });
         }
 
+        // Không cho thanh toán đơn đã hủy
+        if (booking.status === BOOKING_STATUS.CANCELLED) {
+            return res
+                .status(400)
+                .json({ success: false, message: 'Đơn này đã bị hủy, không thể thanh toán!' });
+        }
+
         const orderId = booking.code;
         const createDate = new Date()
             .toISOString()
             .replace(/[-T:\.Z]/g, '')
             .slice(0, 14);
-        const amount = booking.total * 100;
+
+        //  Dùng TIỀN SÂN làm base thanh toán (không tính thiết bị)
+        const fieldAmount = Number(booking.fieldAmount || 0);
+        if (!fieldAmount || fieldAmount <= 0) {
+            return res.status(400).json({ success: false, message: 'Tiền sân không hợp lệ!' });
+        }
+
+        // cọc theo % tiền sân (DEPOSIT_RATE),
+        // nếu DEPOSIT_RATE = 1 thì thu FULL tiền sân
+        const depositAmount = Math.round(fieldAmount * DEPOSIT_RATE);
+
+        // VNPAY dùng đơn vị = VND * 100
+        const amount = depositAmount * 100;
 
         const vnp_Params = {
             vnp_Version: '2.1.0',
@@ -47,7 +79,7 @@ export const createVnpayPayment = async (req, res, next) => {
             vnp_Locale: 'vn',
             vnp_CurrCode: 'VND',
             vnp_TxnRef: orderId,
-            vnp_OrderInfo: `Thanh toan don hang ${orderId}`,
+            vnp_OrderInfo: `Thanh toan tien san cho don ${orderId}`,
             vnp_OrderType: 'billpayment',
             vnp_Amount: amount,
             vnp_ReturnUrl: VNP_RETURN_URL,
@@ -70,6 +102,9 @@ export const createVnpayPayment = async (req, res, next) => {
     }
 };
 
+// ==============================
+// VNPAY callback
+// ==============================
 export const vnpayReturn = async (req, res, next) => {
     try {
         let vnp_Params = { ...req.query };
@@ -91,6 +126,8 @@ export const vnpayReturn = async (req, res, next) => {
 
         const rspCode = vnp_Params.vnp_ResponseCode; // '00' = thành công
         const txnRef = vnp_Params.vnp_TxnRef; // booking.code
+        const amountFromVnp = Number(vnp_Params.vnp_Amount || 0); // đơn vị: VND * 100
+        const paidAmount = amountFromVnp / 100; // VND thực tế
 
         // Tìm booking theo code
         const booking = await Booking.findOne({ code: txnRef });
@@ -98,12 +135,17 @@ export const vnpayReturn = async (req, res, next) => {
             return res.redirect(`${FRONT_END_URL}/payment-return?status=notfound`);
         }
 
-        // CHỈ cập nhật trạng thái thanh toán, KHÔNG đụng vào status (vẫn pending)
-        if (rspCode === '00') {
-            if (booking.paymentStatus !== PAYMENT_STATUS.PAID) {
-                booking.paymentStatus = PAYMENT_STATUS.PAID;
-                await booking.save();
-            }
+        if (rspCode === '00' && paidAmount > 0) {
+            // Thanh toán thành công -> ghi nhận tiền cọc/tiền sân đã trả
+            booking.depositAmount = (booking.depositAmount || 0) + paidAmount;
+            booking.depositMethod = PAYMENT_METHOD.VNPAY;
+            booking.depositStatus = DEPOSIT_STATUS.PAID;
+
+            // Luôn coi là THANH TOÁN MỘT PHẦN
+            // Phần còn lại sẽ thu khi tạo hóa đơn
+            booking.paymentStatus = PAYMENT_STATUS.PARTIAL;
+
+            await booking.save();
         }
 
         // Bắn socket cho FE cập nhật lịch sân
