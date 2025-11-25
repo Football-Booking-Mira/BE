@@ -1,4 +1,5 @@
 import z from 'zod';
+import * as yup from 'yup';
 
 export const createCustomerSchema = z.object({
     name: z
@@ -14,4 +15,20 @@ export const createCustomerSchema = z.object({
         .email('Email sai định dạng!')
         .optional()
         .or(z.literal('')),
+});
+
+
+export const createCustomerOnlineSchema = yup.object({
+    name: yup.string().required(),
+    email: yup.string().email().required(),
+    phone: yup.string().nullable(),
+    password: yup.string().required().min(6),
+    role: yup.string().oneOf(['user', 'admin']).default('user'),
+});
+
+export const registerOnlineSchema = z.object({
+    name: z.string().min(1, 'Tên không được để trống'),
+    email: z.string().email('Email không hợp lệ'),
+    phone: z.string().optional(),
+    password: z.string().min(6, 'Mật khẩu tối thiểu 6 ký tự'),
 });
