@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { authenticate, authorize } from '../../common/middlewares/auth.middleware.js';
 import validBodyRequest from '../../common/middlewares/validBodyRequest.js';
-import { searchUsers, createOfflineCustomer } from './user.controller.js';
-import { createCustomerSchema } from './user.schema.js';
+import { searchUsers, createOfflineCustomer, registerOnlineUser, getUserDetail, updateUser } from './user.controller.js';
+import { createCustomerSchema, registerOnlineSchema } from './user.schema.js';
 
 const userRouter = Router();
 
@@ -19,5 +19,14 @@ userRouter.post(
     validBodyRequest(createCustomerSchema),
     createOfflineCustomer
 );
+
+userRouter.post(
+    '/sign-up',
+    validBodyRequest(registerOnlineSchema),
+    registerOnlineUser
+);
+
+userRouter.get('/:id', getUserDetail);
+userRouter.put('/:id', authenticate, updateUser);
 
 export default userRouter;
