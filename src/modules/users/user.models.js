@@ -23,6 +23,10 @@ const UserSchema = new Schema(
         verificationTokenExpires: { type: Date },
         resetPasswordToken: { type: String },
         resetPasswordExpires: { type: Date },
+        vatar: {
+            type: String,
+            default: '',
+        },
     },
     {
         timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' },

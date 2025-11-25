@@ -7,6 +7,7 @@ import routerPayment from '../modules/payment/payment.routes.js';
 import routesEquipment from '../modules/equipments/equipment.routes.js';
 import routesBookingItem from '../modules/bookingItems/bookingItem.routes.js';
 import userRouter from '../modules/users/user.routes.js';
+import uploadRoutes from '../common/routes/upload.routes.js';
 
 const routes = Router();
 
@@ -18,5 +19,5 @@ routes.use('/payment', routerPayment);
 routes.use('/equipments', routesEquipment);
 routes.use('/booking-items', routesBookingItem);
 routes.use('/users', userRouter);
-
+routes.use('/upload', uploadRoutes);
 export default routes;
