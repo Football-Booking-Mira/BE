@@ -43,7 +43,7 @@ export const registerService = async (payload) => {
 
 //  ĐĂNG NHẬP
 export const loginService = async (payload) => {
-    const findUser = await userModels.findOne({ email: payload.email });
+    const findUser = await userModels.findOne({ email: payload.email }).select('+password');
     if (!findUser) {
         throw createError(StatusCodes.BAD_REQUEST, 'Thông tin đăng nhập không chính xác!');
     }
