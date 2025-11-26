@@ -788,3 +788,75 @@ export const getBookingsByUser = handleAsync(async (req, res, next) => {
         createResponse(true, 200, 'Lấy danh sách booking của người dùng thành công!', bookings)
     );
 });
+// * Lấy thông tin để thanh toán lại cho 1 booking
+export const getRetryPaymentInfo = handleAsync(async (req, res, next) => {
+    const bookingId = req.params.id;
+
+    const booking = await Booking.findById(bookingId)
+        .populate('courtId', 'name type images image address')
+        .populate('customerId', 'name username phone email')
+        .lean();
+
+    if (!booking) return next(createError(404, 'Không tìm thấy booking!'));
+
+    const user = req.user;
+
+    // chỉ cho phép CHÍNH CHỦ user xem lại
+    if (user?.role === USER_ROLES.USER && String(booking.customerId?._id) !== String(user._id)) {
+        return next(createError(403, 'Bạn không có quyền thanh toán lại đơn này!'));
+    }
+
+    // chỉ cho thanh toán lại khi đơn còn hiệu lực (PENDING)
+    if (booking.status !== BOOKING_STATUS.PENDING) {
+        return next(
+            createError(400, 'Chỉ được thanh toán lại cho đơn đang chờ thanh toán/xác nhận!')
+        );
+    }
+
+    // bắt buộc là VNPAY
+    if (booking.paymentMethod !== PAYMENT_METHOD.VNPAY) {
+        return next(
+            createError(
+                400,
+                'Đơn này không thanh toán bằng VNPAY nên không thể thanh toán lại online!'
+            )
+        );
+    }
+
+    // nếu đã thanh toán đủ / đã hoàn tiền thì thôi
+    if ([PAYMENT_STATUS.PAID, PAYMENT_STATUS.REFUNDED].includes(booking.paymentStatus)) {
+        return next(
+            createError(
+                400,
+                'Đơn này đã thanh toán đủ hoặc đã hoàn tiền, không thể thanh toán lại!'
+            )
+        );
+    }
+
+    const total = Number(booking.total || booking.fieldAmount || 0);
+
+    // tiền đã trả (đặt cọc)
+    const depositPaid = booking.depositStatus === 'paid' ? Number(booking.depositAmount || 0) : 0;
+
+    const amountToPay = Math.max(0, total - depositPaid);
+
+    if (amountToPay <= 0) {
+        return next(createError(400, 'Đơn này đã thanh toán đủ tiền!'));
+    }
+
+    return res.json(
+        createResponse(true, 200, 'Lấy thông tin thanh toán lại thành công!', {
+            bookingId: booking._id,
+            status: booking.status,
+            paymentStatus: booking.paymentStatus,
+            total,
+            paidAmount: depositPaid,
+            amountToPay,
+            court: booking.courtId,
+            customer: booking.customerId,
+            date: booking.date,
+            startTime: booking.startTime,
+            endTime: booking.endTime,
+        })
+    );
+});

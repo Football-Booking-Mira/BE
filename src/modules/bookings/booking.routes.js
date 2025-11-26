@@ -19,6 +19,7 @@ import {
     requestRefund,
     updateRefundStatus,
     updateBookingTime,
+    getRetryPaymentInfo,
 } from './booking.controller.js';
 
 const routesBooking = Router();
@@ -38,6 +39,8 @@ routesBooking.get(
     authorize(USER_ROLES.ADMIN),
     getAdminDashboardBookings
 );
+// ĐANG DÙNG
+routesBooking.get('/:id/retry-payment-info', authenticate, getRetryPaymentInfo);
 
 //* ADMIN cập nhật thanh toán
 routesBooking.patch('/:id', authenticate, authorize(USER_ROLES.ADMIN), updateBooking);
