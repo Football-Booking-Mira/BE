@@ -126,7 +126,7 @@ const BookingSchema = new Schema(
             required: true,
         },
 
-        // 💰 Thông tin cọc
+        //  Thông tin cọc
         depositAmount: {
             type: Number,
             min: 0,
@@ -219,6 +219,27 @@ const BookingSchema = new Schema(
             type: String,
             enum: ['none', 'pending', 'processing', 'refunded', 'rejected'],
             default: 'none',
+        },
+        refundAdminReason: {
+            type: String,
+            trim: true,
+            default: '', // lý do admin từ chối hoàn tiền
+        },
+
+        refundBillImage: {
+            type: String,
+            trim: true,
+            default: '', // link ảnh bill/hoá đơn hoàn tiền (Cloudinary...)
+        },
+
+        refundRequestedAt: {
+            type: Date,
+            default: null, // lúc user gửi yêu cầu hoàn tiền
+        },
+
+        refundProcessedAt: {
+            type: Date,
+            default: null, // lúc admin xử lý xong (từ chối / hoàn tiền)
         },
         autoCancelAt: {
             type: Date,

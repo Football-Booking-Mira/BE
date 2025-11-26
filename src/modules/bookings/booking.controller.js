@@ -3,6 +3,7 @@ import {
     PAYMENT_STATUS,
     PAYMENT_METHOD,
     USER_ROLES,
+    DEPOSIT_STATUS,
 } from '../../common/constants/enums.js';
 import createError from '../../utils/error.js';
 import handleAsync from '../../utils/handleAsync.js';
@@ -410,10 +411,10 @@ export const checkinBooking = handleAsync(async (req, res, next) => {
             typeof eq.availableQuantity === 'number'
                 ? 'availableQuantity'
                 : typeof eq.stockLeft === 'number'
-                ? 'stockLeft'
-                : typeof eq.stock === 'number'
-                ? 'stock'
-                : 'totalQuantity';
+                    ? 'stockLeft'
+                    : typeof eq.stock === 'number'
+                        ? 'stock'
+                        : 'totalQuantity';
 
         const currentStock = eq[stockFieldName] || 0;
 
@@ -431,8 +432,8 @@ export const checkinBooking = handleAsync(async (req, res, next) => {
             typeof price === 'number' && price > 0
                 ? price
                 : mode === 'sell'
-                ? eq.salePrice
-                : eq.rentPrice;
+                    ? eq.salePrice
+                    : eq.rentPrice;
 
         const lineSubtotal = unitPrice * qty;
         equipmentTotalCalc += lineSubtotal;
@@ -498,10 +499,10 @@ export const checkoutBooking = handleAsync(async (req, res, next) => {
             typeof eq.availableQuantity === 'number'
                 ? 'availableQuantity'
                 : typeof eq.stockLeft === 'number'
-                ? 'stockLeft'
-                : typeof eq.stock === 'number'
-                ? 'stock'
-                : 'totalQuantity';
+                    ? 'stockLeft'
+                    : typeof eq.stock === 'number'
+                        ? 'stock'
+                        : 'totalQuantity';
 
         eq[stockFieldName] = (eq[stockFieldName] || 0) + item.qty;
 
@@ -867,4 +868,70 @@ export const getRetryPaymentInfo = handleAsync(async (req, res, next) => {
             endTime: booking.endTime,
         })
     );
+});
+//*từ chối hoàn tiền
+export const rejectRefundBooking = handleAsync(async (req, res, next) => {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    const booking = await Booking.findById(id);
+    if (!booking) return next(createError(404, 'Không tìm thấy đơn đặt sân'));
+
+    if (!['pending', 'processing'].includes(booking.refundStatus)) {
+        return next(createError(400, 'Chỉ xử lý đơn đang yêu cầu hoàn tiền'));
+    }
+
+    booking.refundStatus = 'rejected';
+    booking.refundAdminReason = reason || '';
+    booking.refundProcessedAt = new Date();
+
+    await booking.save();
+
+    const io = req.app.get('io');
+    io?.emit('booking_global_updated');
+    if (booking.customerId) {
+        io?.to(String(booking.customerId)).emit('booking_refund_updated', {
+            bookingId: booking._id,
+        });
+    }
+
+    return res.status(200).json(createResponse(true, 200, 'Đã từ chối yêu cầu hoàn tiền', booking));
+});
+export const completeRefundBooking = handleAsync(async (req, res, next) => {
+    const { id } = req.params;
+    const { billImage } = req.body;
+
+    const booking = await Booking.findById(id);
+    if (!booking) return next(createError(404, 'Không tìm thấy đơn đặt sân'));
+
+    if (!['pending', 'processing'].includes(booking.refundStatus)) {
+        return next(createError(400, 'Chỉ xử lý đơn đang yêu cầu hoàn tiền'));
+    }
+
+    if (!billImage) {
+        return next(createError(400, 'Thiếu link ảnh hoá đơn hoàn tiền'));
+    }
+
+    booking.refundStatus = 'refunded';
+    booking.refundBillImage = billImage;
+    booking.refundProcessedAt = new Date();
+
+    booking.paymentStatus = PAYMENT_STATUS.REFUNDED;
+    if (booking.depositAmount > 0) {
+        booking.depositStatus = DEPOSIT_STATUS.REFUNDED;
+    }
+
+    await booking.save();
+
+    const io = req.app.get('io');
+    io?.emit('booking_global_updated');
+    if (booking.customerId) {
+        io?.to(String(booking.customerId)).emit('booking_refund_updated', {
+            bookingId: booking._id,
+        });
+    }
+
+    return res
+        .status(200)
+        .json(createResponse(true, 200, 'Đã cập nhật hoàn tiền thành công', booking));
 });

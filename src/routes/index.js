@@ -1,4 +1,3 @@
-
 import { Router } from 'express';
 import routesCourt from '../modules/courts/court.routes.js';
 import routesBookings from '../modules/bookings/booking.routes.js';
@@ -20,6 +19,6 @@ routes.use('/payment', routerPayment);
 routes.use('/equipments', routesEquipment);
 routes.use('/booking-items', routesBookingItem);
 routes.use('/users', userRouter);
+// upload ảnh đăng ký user,bill chuyển tiền
 routes.use('/upload', uploadRoutes);
-
 export default routes;
