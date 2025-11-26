@@ -148,12 +148,18 @@ export const updateUser = async (req, res) => {
         // Phân quyền cập nhật
         let allowedFields = [];
 
-        if (user.role === "admin") {
-            // Admin chỉ được sửa role, status
+        if (user._id.toString() === id) {
+            // Nếu user cập nhật chính mình
+            if (user.role === "admin") {
+                // Admin tự cập nhật: được sửa tất cả các field (role, status + personal info)
+                allowedFields = ["role", "status", "name", "phone", "email", "avatar"];
+            } else {
+                // User thường chỉ được sửa thông tin cá nhân
+                allowedFields = ["name", "phone", "email", "avatar"];
+            }
+        } else if (user.role === "admin") {
+            // Admin sửa người khác: chỉ sửa role và status
             allowedFields = ["role", "status"];
-        } else if (user._id.toString() === id) {
-            // User chỉ được sửa chính mình → name, phone, email, avatar
-            allowedFields = ["name", "phone", "email", "avatar"];
         } else {
             return res.status(403).json({
                 message: "Bạn không có quyền thực hiện update user này",
@@ -189,6 +195,7 @@ export const updateUser = async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 };
+
 
 export const deleteUser = handleAsync(async (req, res, next) => {
     const { id } = req.params;       // ID user cần xóa
