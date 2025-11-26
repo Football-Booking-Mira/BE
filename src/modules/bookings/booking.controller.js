@@ -11,6 +11,11 @@ import BookingItem from '../bookingItems/bookingItem.models.js';
 import { Court } from '../courts/court.models.js';
 import Equipment from '../equipments/equipment.models.js';
 import Booking from './booking.models.js';
+import {
+    commitVoucherUsage,
+    restoreVoucherUsage,
+    validateVoucherForOrder,
+} from '../vouchers/voucher.service.js';
 
 const toMinutes = (t) => {
     const [h, m] = t.split(':').map(Number);
@@ -164,6 +169,7 @@ export const createBooking = handleAsync(async (req, res, next) => {
         isOffline,
         customerInfo,
         paidAtCreation,
+        voucherCode,
     } = req.body;
 
     if (!courtId || !date || !startTime || !endTime) {
@@ -231,6 +237,24 @@ export const createBooking = handleAsync(async (req, res, next) => {
         return next(createError(400, 'Khung giờ này đã có người đặt!'));
     }
 
+    let voucherPayload = null;
+    if (voucherCode) {
+        if (!finalCustomerId) {
+            return next(createError(400, 'Vui lòng chọn khách hàng để áp dụng voucher!'));
+        }
+        voucherPayload = await validateVoucherForOrder({
+            code: voucherCode,
+            userId: finalCustomerId,
+            orderTotal: fieldAmount,
+            courtId,
+            courtType: court.type,
+            bookingDate: date,
+            startTime,
+        });
+    }
+
+    const voucherDiscount = voucherPayload?.discountAmount || 0;
+
     // OFFLINE: tự động xác nhận
     const initialStatus = isOfflineMode ? BOOKING_STATUS.CONFIRMED : BOOKING_STATUS.PENDING;
 
@@ -245,14 +269,46 @@ export const createBooking = handleAsync(async (req, res, next) => {
         hours: totalHours,
         fieldAmount,
         equipmentTotal: 0,
-        discountTotal: 0,
-        total: fieldAmount,
+        discountTotal: voucherDiscount,
+        total: Math.max(0, fieldAmount - voucherDiscount),
         paymentMethod,
         notes: note || '',
         status: initialStatus,
         paymentStatus: initialPaymentStatus,
         createdBy, // 'admin' hoặc 'user'
+        voucherId: voucherPayload?.voucher?._id || null,
+        voucherCode: voucherPayload?.normalizedCode || '',
+        voucherDiscount,
+        voucherSnapshot: voucherPayload
+            ? {
+                  discountType: voucherPayload.voucher.discountType,
+                  discountValue: voucherPayload.voucher.discountValue,
+                  maxDiscountValue: voucherPayload.voucher.maxDiscountValue,
+                  minOrderValue: voucherPayload.voucher.minOrderValue,
+                  perUserLimit: voucherPayload.voucher.perUserLimit,
+                  startDate: voucherPayload.voucher.startDate,
+                  endDate: voucherPayload.voucher.endDate,
+              }
+            : undefined,
+        voucherUsageStatus: voucherPayload ? 'applied' : 'none',
     });
+
+    if (voucherPayload) {
+        try {
+            const usage = await commitVoucherUsage({
+                voucherId: voucherPayload.voucher._id,
+                bookingId: booking._id,
+                userId: finalCustomerId,
+                discountAmount: voucherDiscount,
+                orderTotal: fieldAmount,
+            });
+            booking.voucherUsageId = usage._id;
+            await booking.save();
+        } catch (error) {
+            await Booking.findByIdAndDelete(booking._id);
+            return next(error);
+        }
+    }
 
     const io = req.app.get('io');
     io?.emit('booking_global_updated');
@@ -299,6 +355,7 @@ export const cancelBooking = handleAsync(async (req, res, next) => {
 
     const user = req.user;
     const { reason, internalNote } = req.body;
+    const previousStatus = booking.status;
 
     //* USER: chỉ được hủy đơn của mình và đang PENDING
     if (user.role === USER_ROLES.USER) {
@@ -334,6 +391,16 @@ export const cancelBooking = handleAsync(async (req, res, next) => {
 
     if (user.role === USER_ROLES.ADMIN && internalNote && internalNote.trim()) {
         booking.cancelNote = internalNote.trim();
+    }
+
+    if (
+        booking.voucherUsageId &&
+        booking.voucherUsageStatus === 'applied' &&
+        ![BOOKING_STATUS.IN_USE, BOOKING_STATUS.COMPLETED].includes(previousStatus)
+    ) {
+        await restoreVoucherUsage(booking);
+        booking.voucherUsageStatus = 'restored';
+        booking.voucherRestoredAt = new Date();
     }
 
     await booking.save();
@@ -454,6 +521,9 @@ export const checkinBooking = handleAsync(async (req, res, next) => {
     booking.equipmentTotal = equipmentTotalCalc;
     booking.total =
         (booking.fieldAmount || 0) + (booking.equipmentTotal || 0) - (booking.discountTotal || 0);
+    if (booking.voucherUsageStatus === 'applied') {
+        booking.voucherUsageStatus = 'consumed';
+    }
 
     await booking.save();
 
@@ -767,6 +837,7 @@ export const getBookings = handleAsync(async (req, res, next) => {
     const bookings = await Booking.find(baseFilter)
         .populate('courtId', 'name type images image address')
         .populate('customerId', 'name username phone email')
+        .populate('voucherId', 'code discountType discountValue maxDiscountValue')
         .sort({ createdAt: -1 })
         .lean();
 
@@ -781,6 +852,7 @@ export const getBookingsByUser = handleAsync(async (req, res, next) => {
     const bookings = await Booking.find({ customerId: userId })
         .populate('courtId', 'name type images image address')
         .populate('customerId', 'name username phone email') //
+        .populate('voucherId', 'code discountType discountValue maxDiscountValue')
         .sort({ createdAt: -1 })
         .lean();
 

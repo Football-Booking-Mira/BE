@@ -27,8 +27,12 @@ export const EQUIPMENT_STATUS = {
     DISCONTINUED: 'discontinued', // Ngừn bán
 };
 export const DISCOUNT_TYPES = {
-    PERSENT: 'in_stock', //Phần %
-    AMOUNT: 'out_of_stock', //Số tiền
+    PERCENT: 'percent', // Phần trăm
+    AMOUNT: 'amount', // Số tiền cố định
+};
+export const VOUCHER_STATUS = {
+    ACTIVE: 'active',
+    INACTIVE: 'inactive',
 };
 export const BOOKING_STATUS = {
     PENDING: 'pending', // Chờ xác nhận

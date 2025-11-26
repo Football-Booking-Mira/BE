@@ -24,6 +24,13 @@ export const bookingSchema = z
                 email: z.string().trim().email('Email không hợp lệ!'),
             })
             .optional(), // để admin tạo offline không bắt buộc gửi
+        voucherCode: z
+            .string()
+            .trim()
+            .min(3, 'Mã voucher tối thiểu 3 ký tự!')
+            .max(30, 'Mã voucher tối đa 30 ký tự!')
+            .regex(/^[A-Za-z0-9_-]+$/, 'Mã voucher chỉ gồm chữ, số, - hoặc _!')
+            .optional(),
     })
     .superRefine((data, ctx) => {
         const [sh, sm] = data.startTime.split(':').map(Number);

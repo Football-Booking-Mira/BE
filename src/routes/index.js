@@ -9,6 +9,7 @@ import routesBookingItem from "../modules/bookingItems/bookingItem.routes.js";
 import userRouter from "../modules/users/user.routes.js";
 import uploadRoutes from "../common/routes/upload.routes.js";
 import emailRoutes from "../modules/email/email.routes.js";
+import voucherRoutes from "../modules/vouchers/voucher.routes.js";
 
 const routes = Router();
 
@@ -23,6 +24,7 @@ routes.use("/users", userRouter);
 routes.use("/upload", uploadRoutes);
 routes.use("/email", emailRoutes);
 routes.use("/email", emailRoutes);
+routes.use("/vouchers", voucherRoutes);
 
 // Bắt tất cả route không tồn tại
 routes.use((req, res) => {
