@@ -1,16 +1,20 @@
-import { Router } from "express";
+
+import { Router } from 'express';
 import {
   createInvoice,
+  getInvoiceByBooking,
   getInvoiceById,
   getInvoices,
   updateInvoiceStatus,
-} from "./invoice.controller.js";
+} from './invoice.controller.js';
+
 
 const routesInvoices = Router();
 
-routesInvoices.post("/", createInvoice);
-routesInvoices.get("/", getInvoices);
-routesInvoices.get("/:id", getInvoiceById);
-routesInvoices.patch("/:id", updateInvoiceStatus);
+routesInvoices.post('/', createInvoice);
+routesInvoices.get('/', getInvoices);
+routesInvoices.get('/by-booking/:bookingId', getInvoiceByBooking);
+routesInvoices.get('/:id', getInvoiceById);
+routesInvoices.patch('/:id', updateInvoiceStatus);
 
 export default routesInvoices;

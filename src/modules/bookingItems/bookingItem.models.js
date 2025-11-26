@@ -1,5 +1,4 @@
 import mongoose from 'mongoose';
-
 const {
     Schema,
     Types: { ObjectId },
@@ -17,6 +16,15 @@ const BookingItemSchema = new Schema(
             ref: 'Equipment',
             required: true,
         },
+        name: {
+            type: String,
+            required: true,
+        }, // Áo pitch, Giày Adidas...
+        unit: {
+            type: String,
+            required: true,
+        }, // cái / đôi / quả / chai...
+        // rent | sell
         mode: {
             type: String,
             enum: ['rent', 'sell'],
@@ -25,14 +33,17 @@ const BookingItemSchema = new Schema(
         qty: {
             type: Number,
             required: true,
+            min: 1,
         },
         price: {
             type: Number,
-            required: true, // đơn giá tại thời điểm dùng
+            required: true, // đơn giá tại thời điểm dùng/bán
+            min: 0,
         },
         subtotal: {
             type: Number,
             required: true, // qty * price
+            min: 0,
         },
     },
     {
@@ -40,6 +51,7 @@ const BookingItemSchema = new Schema(
     }
 );
 
+//* Index để tìm nhanh theo booking
 BookingItemSchema.index({ bookingId: 1 });
 
 const BookingItem = mongoose.model('BookingItem', BookingItemSchema);

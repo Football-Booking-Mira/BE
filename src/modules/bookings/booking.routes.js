@@ -1,4 +1,9 @@
 import { Router } from 'express';
+import { USER_ROLES } from '../../common/constants/enums.js';
+import { authenticate, authorize } from '../../common/middlewares/auth.middleware.js';
+import validBodyRequest from '../../common/middlewares/validBodyRequest.js';
+import { bookingSchema } from './booking.schema.js';
+
 import {
     createBooking,
     checkinBooking,
@@ -11,10 +16,11 @@ import {
     calculateBookingPrice,
     getBookingsByUser,
     updateBooking,
+    requestRefund,
+    updateRefundStatus,
+    updateBookingTime,
+    getRetryPaymentInfo,
 } from './booking.controller.js';
-import validBodyRequest from '../../common/middlewares/validBodyRequest.js';
-import { bookingSchema } from './booking.schema.js';
-import { authenticate, authorize } from '../../common/middlewares/auth.middleware.js';
 
 const routesBooking = Router();
 
@@ -27,13 +33,34 @@ routesBooking.get('/user/:userId', authenticate, getBookingsByUser);
 routesBooking.get('/court/:courtId', getBookingsByCourt);
 routesBooking.get('/calculate', calculateBookingPrice);
 
-routesBooking.get('/admin/dashboard', authenticate, authorize('admin'), getAdminDashboardBookings);
+routesBooking.get(
+    '/admin/dashboard',
+    authenticate,
+    authorize(USER_ROLES.ADMIN),
+    getAdminDashboardBookings
+);
+// ĐANG DÙNG
+routesBooking.get('/:id/retry-payment-info', authenticate, getRetryPaymentInfo);
 
-routesBooking.patch('/:id', authenticate, authorize('admin'), updateBooking);
+//* ADMIN cập nhật thanh toán
+routesBooking.patch('/:id', authenticate, authorize(USER_ROLES.ADMIN), updateBooking);
 
+//* ADMIN chỉnh giờ / sân
+routesBooking.patch('/:id/time', authenticate, authorize(USER_ROLES.ADMIN), updateBookingTime);
+
+routesBooking.patch(
+    '/:id/refund-status',
+    authenticate,
+    authorize(USER_ROLES.ADMIN),
+    updateRefundStatus
+);
+
+//* USER gửi yêu cầu hoàn tiền
+routesBooking.post('/:id/refund-request', authenticate, authorize(USER_ROLES.USER), requestRefund);
+//* hủy , xác nhận ,checkin ,checkout
 routesBooking.patch('/:id/cancel', authenticate, cancelBooking);
-routesBooking.patch('/:id/confirm', authenticate, authorize('admin'), confirmBooking);
-routesBooking.patch('/:id/checkin', authenticate, authorize('admin'), checkinBooking);
-routesBooking.patch('/:id/checkout', authenticate, authorize('admin'), checkoutBooking);
+routesBooking.patch('/:id/confirm', authenticate, authorize(USER_ROLES.ADMIN), confirmBooking);
+routesBooking.patch('/:id/checkin', authenticate, authorize(USER_ROLES.ADMIN), checkinBooking);
+routesBooking.patch('/:id/checkout', authenticate, authorize(USER_ROLES.ADMIN), checkoutBooking);
 
 export default routesBooking;
