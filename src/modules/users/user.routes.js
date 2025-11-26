@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authenticate, authorize } from '../../common/middlewares/auth.middleware.js';
 import validBodyRequest from '../../common/middlewares/validBodyRequest.js';
-import { searchUsers, createOfflineCustomer, registerOnlineUser, getUserDetail, updateUser } from './user.controller.js';
+import { searchUsers, createOfflineCustomer, registerOnlineUser, getUserDetail, updateUser, deleteUser, blockUser, unlockUser } from './user.controller.js';
 import { createCustomerSchema, registerOnlineSchema } from './user.schema.js';
 
 const userRouter = Router();
@@ -28,5 +28,14 @@ userRouter.post(
 
 userRouter.get('/:id', getUserDetail);
 userRouter.put('/:id', authenticate, updateUser);
+userRouter.delete(
+    '/:id',
+    authenticate,
+    deleteUser
+);
+
+userRouter.patch('/:id/block', authenticate, authorize('admin'), blockUser);
+userRouter.patch('/:id/unlock', authenticate, authorize('admin'), unlockUser);
+
 
 export default userRouter;
