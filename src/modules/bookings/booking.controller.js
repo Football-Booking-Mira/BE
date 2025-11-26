@@ -177,12 +177,13 @@ export const createBooking = handleAsync(async (req, res, next) => {
     const roleFromToken = (req.user?.role || USER_ROLES.USER).toLowerCase();
 
     //  Xác định đơn tạo tại quầy:
-    // - FE gửi isOffline: true / 'true'
-    // - HOẶC user hiện tại là admin
     const isOfflineMode =
         isOffline === true || isOffline === 'true' || roleFromToken === USER_ROLES.ADMIN;
+    //Đơn đặt ONLINE (user đặt trên web, thanh toán VNPAY / Momo)
+    const isOnlineMode =
+        !isOfflineMode && [PAYMENT_METHOD.VNPAY, PAYMENT_METHOD.MOMO].includes(paymentMethod);
 
-    // Người tạo đơn (đơn tại quầy coi như admin tạo)
+    // Người tạo đơn
     const createdBy = isOfflineMode ? USER_ROLES.ADMIN : roleFromToken;
 
     // Khách hàng gắn vào booking
@@ -231,9 +232,15 @@ export const createBooking = handleAsync(async (req, res, next) => {
         return next(createError(400, 'Khung giờ này đã có người đặt!'));
     }
 
-    // OFFLINE: tự động xác nhận
     const initialStatus = isOfflineMode ? BOOKING_STATUS.CONFIRMED : BOOKING_STATUS.PENDING;
 
+    //* tự hủy đơn sau 5 phú đơn không thanh toán lại
+    let autoCancelAt = null;
+
+    if (!isOfflineMode && paymentMethod === PAYMENT_METHOD.VNPAY) {
+        const expireMinutes = 5; // tự hủy sau 5 phút
+        autoCancelAt = new Date(Date.now() + expireMinutes * 60 * 1000);
+    }
     const booking = await Booking.create({
         code: `BK${Date.now().toString().slice(-6)}`,
         courtId,
@@ -251,7 +258,8 @@ export const createBooking = handleAsync(async (req, res, next) => {
         notes: note || '',
         status: initialStatus,
         paymentStatus: initialPaymentStatus,
-        createdBy, // 'admin' hoặc 'user'
+        createdBy, // 'admin' hoặc 'user',
+        autoCancelAt,
     });
 
     const io = req.app.get('io');

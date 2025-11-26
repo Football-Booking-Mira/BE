@@ -220,6 +220,11 @@ const BookingSchema = new Schema(
             enum: ['none', 'pending', 'processing', 'refunded', 'rejected'],
             default: 'none',
         },
+        autoCancelAt: {
+            type: Date,
+            default: null,
+            index: true, // để query nhanh hơn
+        },
     },
     {
         timestamps: true,

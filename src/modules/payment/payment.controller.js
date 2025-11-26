@@ -16,8 +16,7 @@ import {
 } from '../../common/config/environment.js';
 
 // Tỉ lệ cọc so với TIỀN SÂN
-// 1   = thanh toán FULL tiền sân
-// 0.3 = cọc 30% tiền sân
+// 1= thanh toán FULL tiền sân
 const DEPOSIT_RATE = 1;
 
 function sortObject(obj) {
@@ -45,7 +44,25 @@ export const createVnpayPayment = async (req, res, next) => {
         if (!booking) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy booking' });
         }
+        //*Không cho thanh toán đơn đã tự hủy do quá hạn */
+        const now = new Date();
+        if (
+            booking.autoCancelAt &&
+            booking.autoCancelAt <= now &&
+            booking.status === BOOKING_STATUS.PENDING &&
+            booking.paymentStatus === PAYMENT_STATUS.UNPAID
+        ) {
+            booking.status = BOOKING_STATUS.CANCELLED;
+            booking.cancelBy = 'system';
+            booking.cancelReason = 'Hết thời gian thanh toán online (5 phút), đơn tự động hủy.';
+            booking.cancelledAt = now;
+            await booking.save();
 
+            return res.status(400).json({
+                success: false,
+                message: 'Đơn đã hết hạn thanh toán (quá 5 phút). Vui lòng đặt sân lại.',
+            });
+        }
         // Không cho thanh toán đơn đã hủy
         if (booking.status === BOOKING_STATUS.CANCELLED) {
             return res
@@ -72,11 +89,11 @@ export const createVnpayPayment = async (req, res, next) => {
         let payNow = 0;
 
         if (isRetryPayment) {
-            // 👉 THANH TOÁN LẠI: chỉ cho trả phần còn thiếu
+            //  THANH TOÁN LẠI: chỉ cho trả phần còn thiếu
             const clientAmount = Number(amount || 0);
             payNow = clientAmount > 0 ? Math.min(clientAmount, remaining) : remaining;
         } else {
-            // 👉 THANH TOÁN LẦN ĐẦU: tính theo tỉ lệ cọc (DEPOSIT_RATE)
+            //  THANH TOÁN LẦN ĐẦU: tính theo tỉ lệ cọc (DEPOSIT_RATE)
             let depositAmount = Math.round(total * DEPOSIT_RATE);
             // không được vượt quá phần còn lại
             depositAmount = Math.min(depositAmount, remaining);
