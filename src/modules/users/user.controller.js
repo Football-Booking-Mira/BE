@@ -189,3 +189,106 @@ export const updateUser = async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 };
+
+export const deleteUser = handleAsync(async (req, res, next) => {
+    const { id } = req.params;       // ID user cần xóa
+    const currentUser = req.user;    // user đang đăng nhập (từ middleware authenticate)
+
+    // Kiểm tra user có tồn tại không
+    const user = await User.findById(id);
+    if (!user) {
+        return res
+            .status(StatusCodes.NOT_FOUND)
+            .json(createResponse(false, StatusCodes.NOT_FOUND, 'Người dùng không tồn tại'));
+    }
+
+    // Chỉ admin hoặc chính chủ được xóa
+    const isOwner = currentUser._id.toString() === id;
+    const isAdmin = currentUser.role === 'admin';
+
+    if (!isOwner && !isAdmin) {
+        return res
+            .status(StatusCodes.FORBIDDEN)
+            .json(
+                createResponse(
+                    false,
+                    StatusCodes.FORBIDDEN,
+                    'Bạn không có quyền xóa tài khoản này'
+                )
+            );
+    }
+
+    // Xóa user
+    await User.findByIdAndDelete(id);
+
+    return res
+        .status(StatusCodes.OK)
+        .json(createResponse(true, StatusCodes.OK, 'Xóa tài khoản thành công'));
+});
+
+
+export const blockUser = handleAsync(async (req, res, next) => {
+    const { id } = req.params;
+    const currentUser = req.user;
+
+    // Kiểm tra quyền admin
+    if (currentUser.role !== 'admin') {
+        return res
+            .status(StatusCodes.FORBIDDEN)
+            .json(
+                createResponse(
+                    false,
+                    StatusCodes.FORBIDDEN,
+                    'Bạn không có quyền block người dùng'
+                )
+            );
+    }
+
+    const user = await User.findById(id);
+    if (!user) {
+        return res
+            .status(StatusCodes.NOT_FOUND)
+            .json(createResponse(false, StatusCodes.NOT_FOUND, 'Người dùng không tồn tại'));
+    }
+
+    // Cập nhật status = banned
+    user.status = 'inactive';
+    await user.save();
+
+    return res
+        .status(StatusCodes.OK)
+        .json(createResponse(true, StatusCodes.OK, 'Block người dùng thành công', user));
+});
+
+export const unlockUser = handleAsync(async (req, res, next) => {
+    const { id } = req.params;
+    const currentUser = req.user;
+
+    // Kiểm tra admin
+    if (currentUser.role !== 'admin') {
+        return res
+            .status(StatusCodes.FORBIDDEN)
+            .json(
+                createResponse(
+                    false,
+                    StatusCodes.FORBIDDEN,
+                    'Bạn không có quyền mở khóa người dùng'
+                )
+            );
+    }
+
+    const user = await User.findById(id);
+    if (!user) {
+        return res
+            .status(StatusCodes.NOT_FOUND)
+            .json(createResponse(false, StatusCodes.NOT_FOUND, 'Người dùng không tồn tại'));
+    }
+
+    // Cập nhật status = active
+    user.status = 'active';
+    await user.save();
+
+    return res
+        .status(StatusCodes.OK)
+        .json(createResponse(true, StatusCodes.OK, 'Mở khóa người dùng thành công', user));
+});
