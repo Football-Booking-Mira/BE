@@ -3,21 +3,20 @@ import {
   PAYMENT_STATUS,
   PAYMENT_METHOD,
   DEPOSIT_STATUS,
-} from "../../common/constants/enums.js";
-import crypto from "crypto";
-import qs from "qs";
-import Booking from "../bookings/booking.models.js";
+} from '../../common/constants/enums.js';
+import crypto from 'crypto';
+import qs from 'qs';
+import Booking from '../bookings/booking.models.js';
 import {
   VNP_URL,
   VNP_TMN_CODE,
   VNP_HASH_SECRET,
   VNP_RETURN_URL,
   FRONT_END_URL,
-} from "../../common/config/environment.js";
+} from '../../common/config/environment.js';
 
 // Tỉ lệ cọc so với TIỀN SÂN
-// 1   = thanh toán FULL tiền sân
-// 0.3 = cọc 30% tiền sân
+// 1= thanh toán FULL tiền sân
 const DEPOSIT_RATE = 1;
 
 function sortObject(obj) {
@@ -26,7 +25,7 @@ function sortObject(obj) {
     .map((k) => encodeURIComponent(k))
     .sort();
   for (const key of keys) {
-    sorted[key] = encodeURIComponent(obj[key]).replace(/%20/g, "+");
+    sorted[key] = encodeURIComponent(obj[key]).replace(/%20/g, '+');
   }
   return sorted;
 }
@@ -36,76 +35,114 @@ function sortObject(obj) {
 // ==============================
 export const createVnpayPayment = async (req, res, next) => {
   try {
-    const { bookingId } = req.body;
+    const { bookingId, amount, isRetryPayment } = req.body;
     if (!bookingId) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Thiếu bookingId" });
+      return res.status(400).json({ success: false, message: 'Thiếu bookingId' });
     }
 
     const booking = await Booking.findById(bookingId);
     if (!booking) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Không tìm thấy booking" });
+      return res.status(404).json({ success: false, message: 'Không tìm thấy booking' });
     }
+    //*Không cho thanh toán đơn đã tự hủy do quá hạn */
+    const now = new Date();
+    if (
+      booking.autoCancelAt &&
+      booking.autoCancelAt <= now &&
+      booking.status === BOOKING_STATUS.PENDING &&
+      booking.paymentStatus === PAYMENT_STATUS.UNPAID
+    ) {
+      booking.status = BOOKING_STATUS.CANCELLED;
+      booking.cancelBy = 'system';
+      booking.cancelReason = 'Hết thời gian thanh toán online (5 phút), đơn tự động hủy.';
+      booking.cancelledAt = now;
+      await booking.save();
 
+      return res.status(400).json({
+        success: false,
+        message: 'Đơn đã hết hạn thanh toán (quá 5 phút). Vui lòng đặt sân lại.',
+      });
+    }
     // Không cho thanh toán đơn đã hủy
     if (booking.status === BOOKING_STATUS.CANCELLED) {
       return res
         .status(400)
-        .json({
-          success: false,
-          message: "Đơn này đã bị hủy, không thể thanh toán!",
-        });
+        .json({ success: false, message: 'Đơn này đã bị hủy, không thể thanh toán!' });
+    }
+
+    // Tổng tiền cần thanh toán cho booking
+    const total = Number(booking.total || booking.fieldAmount || 0);
+    if (!total || total <= 0) {
+      return res.status(400).json({ success: false, message: 'Tổng tiền không hợp lệ!' });
+    }
+
+    const oldDeposit =
+      booking.depositStatus === DEPOSIT_STATUS.PAID ? Number(booking.depositAmount || 0) : 0;
+    const remaining = Math.max(0, total - oldDeposit);
+
+    if (remaining <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: 'Đơn này đã thanh toán đủ tiền!' });
+    }
+
+    let payNow = 0;
+
+    if (isRetryPayment) {
+      //  THANH TOÁN LẠI: chỉ cho trả phần còn thiếu
+      const clientAmount = Number(amount || 0);
+      payNow = clientAmount > 0 ? Math.min(clientAmount, remaining) : remaining;
+    } else {
+      //  THANH TOÁN LẦN ĐẦU: tính theo tỉ lệ cọc (DEPOSIT_RATE)
+      let depositAmount = Math.round(total * DEPOSIT_RATE);
+      // không được vượt quá phần còn lại
+      depositAmount = Math.min(depositAmount, remaining);
+      payNow = depositAmount;
+    }
+
+    if (!payNow || payNow <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: 'Số tiền thanh toán không hợp lệ!' });
     }
 
     const orderId = booking.code;
     const createDate = new Date()
       .toISOString()
-      .replace(/[-T:\.Z]/g, "")
+      .replace(/[-T:\.Z]/g, '')
       .slice(0, 14);
 
-    //  Dùng TIỀN SÂN làm base thanh toán (không tính thiết bị)
-    const fieldAmount = Number(booking.fieldAmount || 0);
-    if (!fieldAmount || fieldAmount <= 0) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Tiền sân không hợp lệ!" });
-    }
-
-    // cọc theo % tiền sân (DEPOSIT_RATE),
-    // nếu DEPOSIT_RATE = 1 thì thu FULL tiền sân
-    const depositAmount = Math.round(fieldAmount * DEPOSIT_RATE);
-
     // VNPAY dùng đơn vị = VND * 100
-    const amount = depositAmount * 100;
+    const vnpAmount = payNow * 100;
 
     const vnp_Params = {
-      vnp_Version: "2.1.0",
-      vnp_Command: "pay",
+      vnp_Version: '2.1.0',
+      vnp_Command: 'pay',
       vnp_TmnCode: VNP_TMN_CODE,
-      vnp_Locale: "vn",
-      vnp_CurrCode: "VND",
+      vnp_Locale: 'vn',
+      vnp_CurrCode: 'VND',
       vnp_TxnRef: orderId,
-      vnp_OrderInfo: `Thanh toan tien san cho don ${orderId}`,
-      vnp_OrderType: "billpayment",
-      vnp_Amount: amount,
+      vnp_OrderInfo: `Thanh toan cho don ${orderId}`,
+      vnp_OrderType: 'billpayment',
+      vnp_Amount: vnpAmount,
       vnp_ReturnUrl: VNP_RETURN_URL,
-      vnp_IpAddr: req.ip || "127.0.0.1",
+      vnp_IpAddr: req.ip || '127.0.0.1',
       vnp_CreateDate: createDate,
     };
 
     const sorted = sortObject(vnp_Params);
     const signData = qs.stringify(sorted, { encode: false });
-    const hmac = crypto.createHmac("sha512", VNP_HASH_SECRET.trim());
-    const signed = hmac.update(Buffer.from(signData, "utf-8")).digest("hex");
+    const hmac = crypto.createHmac('sha512', VNP_HASH_SECRET.trim());
+    const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
 
     sorted.vnp_SecureHash = signed;
 
     const paymentUrl = `${VNP_URL}?${qs.stringify(sorted, { encode: false })}`;
 
-    return res.json({ success: true, paymentUrl });
+    return res.json({
+      success: true,
+      data: { paymentUrl, payNow, remaining, total, oldDeposit },
+    });
   } catch (err) {
     next(err);
   }
@@ -125,8 +162,8 @@ export const vnpayReturn = async (req, res, next) => {
     vnp_Params = sortObject(vnp_Params);
 
     const signData = qs.stringify(vnp_Params, { encode: false });
-    const hmac = crypto.createHmac("sha512", VNP_HASH_SECRET.trim());
-    const signed = hmac.update(Buffer.from(signData, "utf-8")).digest("hex");
+    const hmac = crypto.createHmac('sha512', VNP_HASH_SECRET.trim());
+    const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
 
     // Sai chữ ký -> trả về FE báo invalid
     if (secureHash !== signed) {
@@ -144,22 +181,32 @@ export const vnpayReturn = async (req, res, next) => {
       return res.redirect(`${FRONT_END_URL}/payment-return?status=notfound`);
     }
 
-    if (rspCode === "00" && paidAmount > 0) {
-      // Thanh toán thành công -> ghi nhận tiền cọc/tiền sân đã trả
-      booking.depositAmount = (booking.depositAmount || 0) + paidAmount;
+    //  Ghi nhận tiền đã thanh toán (cộng dồn cọc + cập nhật paymentStatus)
+    if (rspCode === '00' && paidAmount > 0) {
+      const oldDeposit = Number(booking.depositAmount || 0);
+      const newDeposit = oldDeposit + paidAmount;
+
+      booking.depositAmount = newDeposit;
       booking.depositMethod = PAYMENT_METHOD.VNPAY;
       booking.depositStatus = DEPOSIT_STATUS.PAID;
 
-      // Luôn coi là THANH TOÁN MỘT PHẦN
-      // Phần còn lại sẽ thu khi tạo hóa đơn
-      booking.paymentStatus = PAYMENT_STATUS.PARTIAL;
+      const total = Number(booking.total || booking.fieldAmount || 0);
+
+      if (total > 0 && newDeposit >= total) {
+        booking.paymentStatus = PAYMENT_STATUS.PAID;
+      } else if (newDeposit > 0) {
+        booking.paymentStatus = PAYMENT_STATUS.PARTIAL;
+      } else {
+        booking.paymentStatus = PAYMENT_STATUS.UNPAID;
+      }
 
       await booking.save();
     }
 
     // Bắn socket cho FE cập nhật lịch sân
-    const io = req.app.get("io");
-    io?.to(String(booking.courtId)).emit("booking_updated", {
+    const io = req.app.get('io');
+    io?.emit('booking_global_updated');
+    io?.to(String(booking.courtId)).emit('booking_updated', {
       courtId: String(booking.courtId),
       date: booking.date.toISOString().slice(0, 10),
     });

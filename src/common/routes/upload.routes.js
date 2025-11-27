@@ -16,5 +16,18 @@ router.post('/avatar', upload.single('avatar'), (req, res) => {
         })
     );
 });
+//*Upload 1 file ảnh  dùng cho bill hoàn tiền
+router.post('/single', upload.single('file'), (req, res) => {
+    if (!req.file || !req.file.path) {
+        return res.status(400).json(createResponse(false, 400, 'Upload file thất bại!', null));
+    }
+
+    // FE đang đọc: res.data.data.url
+    return res.status(201).json(
+        createResponse(true, 201, 'Upload file thành công!', {
+            url: req.file.path,
+        })
+    );
+});
 
 export default router;

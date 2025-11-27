@@ -3,6 +3,7 @@ import {
     PAYMENT_STATUS,
     PAYMENT_METHOD,
     USER_ROLES,
+    DEPOSIT_STATUS,
 } from '../../common/constants/enums.js';
 import createError from '../../utils/error.js';
 import handleAsync from '../../utils/handleAsync.js';
@@ -177,12 +178,13 @@ export const createBooking = handleAsync(async (req, res, next) => {
     const roleFromToken = (req.user?.role || USER_ROLES.USER).toLowerCase();
 
     //  Xác định đơn tạo tại quầy:
-    // - FE gửi isOffline: true / 'true'
-    // - HOẶC user hiện tại là admin
     const isOfflineMode =
         isOffline === true || isOffline === 'true' || roleFromToken === USER_ROLES.ADMIN;
+    //Đơn đặt ONLINE (user đặt trên web, thanh toán VNPAY / Momo)
+    const isOnlineMode =
+        !isOfflineMode && [PAYMENT_METHOD.VNPAY, PAYMENT_METHOD.MOMO].includes(paymentMethod);
 
-    // Người tạo đơn (đơn tại quầy coi như admin tạo)
+    // Người tạo đơn
     const createdBy = isOfflineMode ? USER_ROLES.ADMIN : roleFromToken;
 
     // Khách hàng gắn vào booking
@@ -231,9 +233,15 @@ export const createBooking = handleAsync(async (req, res, next) => {
         return next(createError(400, 'Khung giờ này đã có người đặt!'));
     }
 
-    // OFFLINE: tự động xác nhận
     const initialStatus = isOfflineMode ? BOOKING_STATUS.CONFIRMED : BOOKING_STATUS.PENDING;
 
+    //* tự hủy đơn sau 5 phú đơn không thanh toán lại
+    let autoCancelAt = null;
+
+    if (!isOfflineMode && paymentMethod === PAYMENT_METHOD.VNPAY) {
+        const expireMinutes = 5; // tự hủy sau 5 phút
+        autoCancelAt = new Date(Date.now() + expireMinutes * 60 * 1000);
+    }
     const booking = await Booking.create({
         code: `BK${Date.now().toString().slice(-6)}`,
         courtId,
@@ -251,7 +259,8 @@ export const createBooking = handleAsync(async (req, res, next) => {
         notes: note || '',
         status: initialStatus,
         paymentStatus: initialPaymentStatus,
-        createdBy, // 'admin' hoặc 'user'
+        createdBy, // 'admin' hoặc 'user',
+        autoCancelAt,
     });
 
     const io = req.app.get('io');
@@ -402,10 +411,10 @@ export const checkinBooking = handleAsync(async (req, res, next) => {
             typeof eq.availableQuantity === 'number'
                 ? 'availableQuantity'
                 : typeof eq.stockLeft === 'number'
-                ? 'stockLeft'
-                : typeof eq.stock === 'number'
-                ? 'stock'
-                : 'totalQuantity';
+                    ? 'stockLeft'
+                    : typeof eq.stock === 'number'
+                        ? 'stock'
+                        : 'totalQuantity';
 
         const currentStock = eq[stockFieldName] || 0;
 
@@ -423,8 +432,8 @@ export const checkinBooking = handleAsync(async (req, res, next) => {
             typeof price === 'number' && price > 0
                 ? price
                 : mode === 'sell'
-                ? eq.salePrice
-                : eq.rentPrice;
+                    ? eq.salePrice
+                    : eq.rentPrice;
 
         const lineSubtotal = unitPrice * qty;
         equipmentTotalCalc += lineSubtotal;
@@ -490,10 +499,10 @@ export const checkoutBooking = handleAsync(async (req, res, next) => {
             typeof eq.availableQuantity === 'number'
                 ? 'availableQuantity'
                 : typeof eq.stockLeft === 'number'
-                ? 'stockLeft'
-                : typeof eq.stock === 'number'
-                ? 'stock'
-                : 'totalQuantity';
+                    ? 'stockLeft'
+                    : typeof eq.stock === 'number'
+                        ? 'stock'
+                        : 'totalQuantity';
 
         eq[stockFieldName] = (eq[stockFieldName] || 0) + item.qty;
 
@@ -787,4 +796,142 @@ export const getBookingsByUser = handleAsync(async (req, res, next) => {
     return res.json(
         createResponse(true, 200, 'Lấy danh sách booking của người dùng thành công!', bookings)
     );
+});
+// * Lấy thông tin để thanh toán lại cho 1 booking
+export const getRetryPaymentInfo = handleAsync(async (req, res, next) => {
+    const bookingId = req.params.id;
+
+    const booking = await Booking.findById(bookingId)
+        .populate('courtId', 'name type images image address')
+        .populate('customerId', 'name username phone email')
+        .lean();
+
+    if (!booking) return next(createError(404, 'Không tìm thấy booking!'));
+
+    const user = req.user;
+
+    // chỉ cho phép CHÍNH CHỦ user xem lại
+    if (user?.role === USER_ROLES.USER && String(booking.customerId?._id) !== String(user._id)) {
+        return next(createError(403, 'Bạn không có quyền thanh toán lại đơn này!'));
+    }
+
+    // chỉ cho thanh toán lại khi đơn còn hiệu lực (PENDING)
+    if (booking.status !== BOOKING_STATUS.PENDING) {
+        return next(
+            createError(400, 'Chỉ được thanh toán lại cho đơn đang chờ thanh toán/xác nhận!')
+        );
+    }
+
+    // bắt buộc là VNPAY
+    if (booking.paymentMethod !== PAYMENT_METHOD.VNPAY) {
+        return next(
+            createError(
+                400,
+                'Đơn này không thanh toán bằng VNPAY nên không thể thanh toán lại online!'
+            )
+        );
+    }
+
+    // nếu đã thanh toán đủ / đã hoàn tiền thì thôi
+    if ([PAYMENT_STATUS.PAID, PAYMENT_STATUS.REFUNDED].includes(booking.paymentStatus)) {
+        return next(
+            createError(
+                400,
+                'Đơn này đã thanh toán đủ hoặc đã hoàn tiền, không thể thanh toán lại!'
+            )
+        );
+    }
+
+    const total = Number(booking.total || booking.fieldAmount || 0);
+
+    // tiền đã trả (đặt cọc)
+    const depositPaid = booking.depositStatus === 'paid' ? Number(booking.depositAmount || 0) : 0;
+
+    const amountToPay = Math.max(0, total - depositPaid);
+
+    if (amountToPay <= 0) {
+        return next(createError(400, 'Đơn này đã thanh toán đủ tiền!'));
+    }
+
+    return res.json(
+        createResponse(true, 200, 'Lấy thông tin thanh toán lại thành công!', {
+            bookingId: booking._id,
+            status: booking.status,
+            paymentStatus: booking.paymentStatus,
+            total,
+            paidAmount: depositPaid,
+            amountToPay,
+            court: booking.courtId,
+            customer: booking.customerId,
+            date: booking.date,
+            startTime: booking.startTime,
+            endTime: booking.endTime,
+        })
+    );
+});
+//*từ chối hoàn tiền
+export const rejectRefundBooking = handleAsync(async (req, res, next) => {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    const booking = await Booking.findById(id);
+    if (!booking) return next(createError(404, 'Không tìm thấy đơn đặt sân'));
+
+    if (!['pending', 'processing'].includes(booking.refundStatus)) {
+        return next(createError(400, 'Chỉ xử lý đơn đang yêu cầu hoàn tiền'));
+    }
+
+    booking.refundStatus = 'rejected';
+    booking.refundAdminReason = reason || '';
+    booking.refundProcessedAt = new Date();
+
+    await booking.save();
+
+    const io = req.app.get('io');
+    io?.emit('booking_global_updated');
+    if (booking.customerId) {
+        io?.to(String(booking.customerId)).emit('booking_refund_updated', {
+            bookingId: booking._id,
+        });
+    }
+
+    return res.status(200).json(createResponse(true, 200, 'Đã từ chối yêu cầu hoàn tiền', booking));
+});
+export const completeRefundBooking = handleAsync(async (req, res, next) => {
+    const { id } = req.params;
+    const { billImage } = req.body;
+
+    const booking = await Booking.findById(id);
+    if (!booking) return next(createError(404, 'Không tìm thấy đơn đặt sân'));
+
+    if (!['pending', 'processing'].includes(booking.refundStatus)) {
+        return next(createError(400, 'Chỉ xử lý đơn đang yêu cầu hoàn tiền'));
+    }
+
+    if (!billImage) {
+        return next(createError(400, 'Thiếu link ảnh hoá đơn hoàn tiền'));
+    }
+
+    booking.refundStatus = 'refunded';
+    booking.refundBillImage = billImage;
+    booking.refundProcessedAt = new Date();
+
+    booking.paymentStatus = PAYMENT_STATUS.REFUNDED;
+    if (booking.depositAmount > 0) {
+        booking.depositStatus = DEPOSIT_STATUS.REFUNDED;
+    }
+
+    await booking.save();
+
+    const io = req.app.get('io');
+    io?.emit('booking_global_updated');
+    if (booking.customerId) {
+        io?.to(String(booking.customerId)).emit('booking_refund_updated', {
+            bookingId: booking._id,
+        });
+    }
+
+    return res
+        .status(200)
+        .json(createResponse(true, 200, 'Đã cập nhật hoàn tiền thành công', booking));
 });

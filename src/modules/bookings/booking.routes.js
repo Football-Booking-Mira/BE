@@ -19,6 +19,9 @@ import {
     requestRefund,
     updateRefundStatus,
     updateBookingTime,
+    getRetryPaymentInfo,
+    completeRefundBooking,
+    rejectRefundBooking,
 } from './booking.controller.js';
 
 const routesBooking = Router();
@@ -38,6 +41,8 @@ routesBooking.get(
     authorize(USER_ROLES.ADMIN),
     getAdminDashboardBookings
 );
+// ĐANG DÙNG
+routesBooking.get('/:id/retry-payment-info', authenticate, getRetryPaymentInfo);
 
 //* ADMIN cập nhật thanh toán
 routesBooking.patch('/:id', authenticate, authorize(USER_ROLES.ADMIN), updateBooking);
@@ -50,6 +55,20 @@ routesBooking.patch(
     authenticate,
     authorize(USER_ROLES.ADMIN),
     updateRefundStatus
+);
+// Admin xử lý hoàn tiền
+routesBooking.post(
+    '/:id/refund/reject',
+    authenticate,
+    authorize(USER_ROLES.ADMIN),
+    rejectRefundBooking
+);
+
+routesBooking.post(
+    '/:id/refund/complete',
+    authenticate,
+    authorize(USER_ROLES.ADMIN),
+    completeRefundBooking
 );
 
 //* USER gửi yêu cầu hoàn tiền
