@@ -23,6 +23,8 @@ import {
     completeRefundBooking,
     rejectRefundBooking,
     addEquipmentsBooking,
+    getBookingDetailAdmin,
+    getBookingEquipmentsDetail,
 } from './booking.controller.js';
 
 const routesBooking = Router();
@@ -83,6 +85,20 @@ routesBooking.patch(
     authenticate,
     authorize(USER_ROLES.ADMIN),
     addEquipmentsBooking
+);
+// Admin xem chi tiết đơn + thiết bị
+routesBooking.get(
+    '/:id/admin-detail',
+    authenticate,
+    authorize(USER_ROLES.ADMIN),
+    getBookingDetailAdmin
+);
+// LẤY THIẾT BỊ CỦA ĐƠN (cho admin xem / prefill)
+routesBooking.get(
+    '/:id/equipments-detail',
+    authenticate,
+    authorize(USER_ROLES.ADMIN),
+    getBookingEquipmentsDetail
 );
 routesBooking.patch('/:id/checkout', authenticate, authorize(USER_ROLES.ADMIN), checkoutBooking);
 
