@@ -956,3 +956,46 @@ export const completeRefundBooking = handleAsync(async (req, res, next) => {
         .status(200)
         .json(createResponse(true, 200, 'Đã cập nhật hoàn tiền thành công', booking));
 });
+export const addEquipmentsBooking = handleAsync(async (req, res, next) => {
+    const bookingId = req.params.id;
+    const { items = [], equipmentTotal = 0 } = req.body;
+    const booking = await Booking.findById(bookingId);
+    if (!booking) return next(createError(404, 'Không tìm thấy đơn đặt sân'));
+    //  cho thêm thiết bị khi đơn đang sử dụng
+    if (booking.status !== BOOKING_STATUS.IN_USE) {
+        return next(createError(400, 'Chỉ đơn đang sử dụng mới được thêm thiết bị'));
+    }
+    //* Dùng lại logic xử lý thiết bị giống trong checkinBooking
+    //*trừ tồn kho từng thiết bị
+    for (const item of items) {
+        const eq = await Equipment.findById(item.equipmentId);
+        if (!eq) return next(createError(404, 'Thiết bị không tồn tại'));
+
+        const qty = Number(item.qty || 0);
+        if (qty <= 0) continue;
+
+        if (eq.stock < qty) {
+            return next(
+                createError(
+                    400,
+                    `Thiết bị "${eq.name}" không đủ số lượng. Còn lại: ${eq.stock}, yêu cầu: ${qty}`
+                )
+            );
+        }
+
+        eq.stock -= qty;
+        await eq.save();
+    }
+    booking.equipmentTotal = (booking.equipmentTotal || 0) + (equipmentTotal || 0);
+    booking.total =
+        (booking.fieldAmount || 0) + (booking.equipmentTotal || 0) - (booking.discountTotal || 0);
+
+    await booking.save();
+
+    const io = req.app.get('io');
+    io?.emit('booking_global_updated');
+    io?.to(String(booking.courtId)).emit('booking_updated', {
+        courtId: String(booking.courtId),
+    });
+    res.json(createResponse(booking, 'Đã thêm thiết bị cho đơn đang sử dụng'));
+});

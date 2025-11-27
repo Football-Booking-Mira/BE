@@ -22,6 +22,7 @@ import {
     getRetryPaymentInfo,
     completeRefundBooking,
     rejectRefundBooking,
+    addEquipmentsBooking,
 } from './booking.controller.js';
 
 const routesBooking = Router();
@@ -77,6 +78,12 @@ routesBooking.post('/:id/refund-request', authenticate, authorize(USER_ROLES.USE
 routesBooking.patch('/:id/cancel', authenticate, cancelBooking);
 routesBooking.patch('/:id/confirm', authenticate, authorize(USER_ROLES.ADMIN), confirmBooking);
 routesBooking.patch('/:id/checkin', authenticate, authorize(USER_ROLES.ADMIN), checkinBooking);
+routesBooking.patch(
+    '/:id/equipments',
+    authenticate,
+    authorize(USER_ROLES.ADMIN),
+    addEquipmentsBooking
+);
 routesBooking.patch('/:id/checkout', authenticate, authorize(USER_ROLES.ADMIN), checkoutBooking);
 
 export default routesBooking;
