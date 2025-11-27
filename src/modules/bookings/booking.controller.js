@@ -391,6 +391,27 @@ export const checkinBooking = handleAsync(async (req, res, next) => {
         return next(createError(400, 'Chỉ đơn đã xác nhận mới được check-in'));
     }
 
+    //* Không cho checkin trước ngày đá
+    //* booking.date có thể là Date hoặc string, ép sang Date rồi so theo ngày
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()); //giờ checkin
+    const bookingDateObj = new Date(booking.date);
+    const bookingDate = new Date(
+        bookingDateObj.getFullYear(),
+        bookingDateObj.getMonth(),
+        bookingDateObj.getDate()
+    ); //*00:00 Đặt sân
+    if (bookingDate.getTime() > today.getTime()) {
+        return next(
+            createError(
+                400,
+                `Không thể check-in trước ngày đá. Chỉ được check-in từ 00:00 ngày ${bookingDate.toLocaleDateString(
+                    'vi-VN'
+                )} `
+            )
+        );
+    }
+
     //* Xóa booking_items cũ (nếu có) rồi tạo lại
     await BookingItem.deleteMany({ bookingId });
 
@@ -411,10 +432,10 @@ export const checkinBooking = handleAsync(async (req, res, next) => {
             typeof eq.availableQuantity === 'number'
                 ? 'availableQuantity'
                 : typeof eq.stockLeft === 'number'
-                    ? 'stockLeft'
-                    : typeof eq.stock === 'number'
-                        ? 'stock'
-                        : 'totalQuantity';
+                ? 'stockLeft'
+                : typeof eq.stock === 'number'
+                ? 'stock'
+                : 'totalQuantity';
 
         const currentStock = eq[stockFieldName] || 0;
 
@@ -432,8 +453,8 @@ export const checkinBooking = handleAsync(async (req, res, next) => {
             typeof price === 'number' && price > 0
                 ? price
                 : mode === 'sell'
-                    ? eq.salePrice
-                    : eq.rentPrice;
+                ? eq.salePrice
+                : eq.rentPrice;
 
         const lineSubtotal = unitPrice * qty;
         equipmentTotalCalc += lineSubtotal;
@@ -499,10 +520,10 @@ export const checkoutBooking = handleAsync(async (req, res, next) => {
             typeof eq.availableQuantity === 'number'
                 ? 'availableQuantity'
                 : typeof eq.stockLeft === 'number'
-                    ? 'stockLeft'
-                    : typeof eq.stock === 'number'
-                        ? 'stock'
-                        : 'totalQuantity';
+                ? 'stockLeft'
+                : typeof eq.stock === 'number'
+                ? 'stock'
+                : 'totalQuantity';
 
         eq[stockFieldName] = (eq[stockFieldName] || 0) + item.qty;
 
