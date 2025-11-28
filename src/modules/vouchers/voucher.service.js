@@ -260,6 +260,33 @@ export const getVoucherStatsData = async (voucherId) => {
     },
     { $sort: { totalDiscount: -1 } },
     { $limit: 20 },
+    {
+      $lookup: {
+        from: "users",
+        localField: "_id",
+        foreignField: "_id",
+        as: "user",
+      },
+    },
+    {
+      $unwind: {
+        path: "$user",
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+    {
+      $project: {
+        _id: 1,
+        totalDiscount: 1,
+        count: 1,
+        user: {
+          _id: "$user._id",
+          name: "$user.name",
+          email: "$user.email",
+          phone: "$user.phone",
+        },
+      },
+    },
   ]);
 
   const bookingUsages = await VoucherUsage.find({ voucherId: voucher._id })

@@ -22,6 +22,30 @@ const ensureValidCourts = (courtIds = []) => {
     return uniqueIds;
 };
 
+export const getVouchers = handleAsync(async (req, res) => {
+    const { q, status, limit = 50 } = req.query;
+
+    const filters = { isDeleted: { $ne: true } };
+    if (typeof q === 'string' && q.trim()) {
+        filters.code = { $regex: q.trim(), $options: 'i' };
+    }
+    if (typeof status === 'string' && status.trim()) {
+        filters.status = status.trim();
+    }
+
+    const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+
+    const vouchers = await Voucher.find(filters)
+        .sort({ createdAt: -1 })
+        .limit(safeLimit)
+        .select(
+            'code status discountType discountValue maxDiscountValue totalIssued remainingQuantity usageCount startDate endDate createdAt'
+        )
+        .lean();
+
+    return res.json(createResponse(true, 200, 'Lấy danh sách voucher thành công!', vouchers));
+});
+
 export const createVoucher = handleAsync(async (req, res, next) => {
     const {
         code,
@@ -167,6 +191,7 @@ export const getVoucherStats = handleAsync(async (req, res, next) => {
 });
 
 export default {
+    getVouchers,
     createVoucher,
     validateVoucher,
     getVoucherStats,
