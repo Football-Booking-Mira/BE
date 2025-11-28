@@ -191,15 +191,7 @@ export const createBooking = handleAsync(async (req, res, next) => {
     const finalCustomerId =
         createdBy === USER_ROLES.ADMIN ? customerId || null : req.user?._id || customerId || null;
 
-    // Trạng thái thanh toán ban đầu
-    let initialPaymentStatus = PAYMENT_STATUS.UNPAID;
-    if (
-        isOfflineMode && // đơn tại quầy
-        paymentMethod === PAYMENT_METHOD.CASH &&
-        paidAtCreation === true // đã thu tiền luôn
-    ) {
-        initialPaymentStatus = PAYMENT_STATUS.PAID;
-    }
+
 
     // Chuẩn hóa thông tin khách hàng
     const normalizedCustomerInfo = {
@@ -214,12 +206,90 @@ export const createBooking = handleAsync(async (req, res, next) => {
     if (slotCount === 0) {
         return next(createError(400, 'Khung giờ không hợp lệ hoặc nằm ngoài giờ hoạt động!'));
     }
+    // Xử lý ngày và giờ đá
+    const bookingDateObj = new Date(date);
+    if (Number.isNaN(bookingDateObj.getTime())) {
+        return next(createError(400, 'Ngày đặt không hợp lệ!'));
+    }
+    // Ngàu 00:00 giờ bôking
+    const bookingDay = new Date(
+        bookingDateObj.getFullYear(),
+        bookingDateObj.getMonth(),
+        bookingDateObj.getDate()
+    );
+    // thời gian hiện tại
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    // giờ bắt đầu trận đấu (ghép date + startTime)
+    const [sh, sm] = startTime.split(':').map(Number);
+    const bookingStartDateTime = new Date(
+        bookingDateObj.getFullYear(),
+        bookingDateObj.getMonth(),
+        bookingDateObj.getDate(),
+        sh,
+        sm || 0,
+        0,
+        0
+    );
+    // Trận đá tương lai 
+    //  - Khác ngày: bookingDay > today
+    //  - Hoặc cùng ngày nhưng giờ bắt đầu > bây giờ (VD: sáng đặt chiều đá)
+    const isFutureMatch =
+        bookingDay.getTime() > today.getTime() ||
+        (bookingDay.getTime() === today.getTime() &&
+            bookingStartDateTime.getTime() > now.getTime());
+    let initialPaymentStatus = PAYMENT_STATUS.UNPAID;
+    let depositAmount = 0;
+    let depositStatus = DEPOSIT_STATUS.PENDING;
+    let depositMethod = undefined;
+
+    // ĐƠN TẠI QUẦY (OFFLINE + CASH)
+    if (isOfflineMode && paymentMethod === PAYMENT_METHOD.CASH) {
+        if (isFutureMatch) {
+            // Khách đặt KHÁC NGÀY hoặc SÁNG ĐẶT CHIỀU ĐÁ:
+            //    => BẮT BUỘC phải cọc tối thiểu 50%
+            const paidFlag = paidAtCreation === true || paidAtCreation === 'true';
+
+            if (!paidFlag) {
+                return next(
+                    createError(
+                        400,
+                        'Khách đặt sân đá sau (khác ngày hoặc khác giờ) bắt buộc phải cọc tối thiểu 50% tiền sân!'
+                    )
+                );
+            }
+
+            // Tự set cọc 50%
+            depositAmount = Math.round(fieldAmount * 0.5);
+            depositStatus = DEPOSIT_STATUS.PAID;
+            depositMethod = PAYMENT_METHOD.CASH;
+
+            // Mới thanh toán 1 phần (cọc) => PARTIAL
+            initialPaymentStatus = PAYMENT_STATUS.PARTIAL;
+        } else {
+            //  Đặt và đá GẦN NHƯ NGAY LẬP TỨC (cùng ngày và giờ bắt đầu <= hiện tại)
+            const paidFlag = paidAtCreation === true || paidAtCreation === 'true';
+
+            if (paidFlag) {
+                // Thu đủ luôn
+                initialPaymentStatus = PAYMENT_STATUS.PAID;
+            } else {
+                // Chưa thu đồng nào
+                initialPaymentStatus = PAYMENT_STATUS.UNPAID;
+            }
+        }
+    } else {
+        //  Các trường hợp còn lại (ONLINE, chuyển khoản,...)
+        initialPaymentStatus = PAYMENT_STATUS.UNPAID;
+    }
 
     // Check trùng giờ (không tính đơn đã hủy)
-    const day = new Date(date);
+    const day = new Date(bookingDay);
     day.setHours(0, 0, 0, 0);
     const nextDay = new Date(day);
     nextDay.setDate(day.getDate() + 1);
+
 
     const hasOverlap = await Booking.findOne({
         courtId,
@@ -232,7 +302,7 @@ export const createBooking = handleAsync(async (req, res, next) => {
     if (hasOverlap) {
         return next(createError(400, 'Khung giờ này đã có người đặt!'));
     }
-
+    // Trạng thái booking ban đầu
     const initialStatus = isOfflineMode ? BOOKING_STATUS.CONFIRMED : BOOKING_STATUS.PENDING;
 
     //* tự hủy đơn sau 5 phú đơn không thanh toán lại
@@ -261,6 +331,10 @@ export const createBooking = handleAsync(async (req, res, next) => {
         paymentStatus: initialPaymentStatus,
         createdBy, // 'admin' hoặc 'user',
         autoCancelAt,
+        //Thoong tin cọc 
+        depositAmount,
+        depositStatus,
+        depositMethod,
     });
 
     const io = req.app.get('io');
@@ -432,10 +506,10 @@ export const checkinBooking = handleAsync(async (req, res, next) => {
             typeof eq.availableQuantity === 'number'
                 ? 'availableQuantity'
                 : typeof eq.stockLeft === 'number'
-                ? 'stockLeft'
-                : typeof eq.stock === 'number'
-                ? 'stock'
-                : 'totalQuantity';
+                    ? 'stockLeft'
+                    : typeof eq.stock === 'number'
+                        ? 'stock'
+                        : 'totalQuantity';
 
         const currentStock = eq[stockFieldName] || 0;
 
@@ -453,8 +527,8 @@ export const checkinBooking = handleAsync(async (req, res, next) => {
             typeof price === 'number' && price > 0
                 ? price
                 : mode === 'sell'
-                ? eq.salePrice
-                : eq.rentPrice;
+                    ? eq.salePrice
+                    : eq.rentPrice;
 
         const lineSubtotal = unitPrice * qty;
         equipmentTotalCalc += lineSubtotal;
@@ -520,10 +594,10 @@ export const checkoutBooking = handleAsync(async (req, res, next) => {
             typeof eq.availableQuantity === 'number'
                 ? 'availableQuantity'
                 : typeof eq.stockLeft === 'number'
-                ? 'stockLeft'
-                : typeof eq.stock === 'number'
-                ? 'stock'
-                : 'totalQuantity';
+                    ? 'stockLeft'
+                    : typeof eq.stock === 'number'
+                        ? 'stock'
+                        : 'totalQuantity';
 
         eq[stockFieldName] = (eq[stockFieldName] || 0) + item.qty;
 
@@ -987,10 +1061,10 @@ export const addEquipmentsBooking = handleAsync(async (req, res, next) => {
             typeof eq.availableQuantity === 'number'
                 ? 'availableQuantity'
                 : typeof eq.stockLeft === 'number'
-                ? 'stockLeft'
-                : typeof eq.stock === 'number'
-                ? 'stock'
-                : 'totalQuantity';
+                    ? 'stockLeft'
+                    : typeof eq.stock === 'number'
+                        ? 'stock'
+                        : 'totalQuantity';
 
         const currentStock = eq[stockFieldName] || 0;
         if (currentStock < realQty) {
@@ -1006,8 +1080,8 @@ export const addEquipmentsBooking = handleAsync(async (req, res, next) => {
             typeof price === 'number' && price > 0
                 ? price
                 : mode === 'sell'
-                ? eq.salePrice
-                : eq.rentPrice;
+                    ? eq.salePrice
+                    : eq.rentPrice;
 
         const lineSubtotal = unitPrice * realQty;
         equipmentTotalCalc += lineSubtotal;
