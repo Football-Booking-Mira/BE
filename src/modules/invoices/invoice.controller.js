@@ -55,10 +55,10 @@ export const createInvoice = async (req, res) => {
         // Số tiền cuối cùng cần thu trên hóa đơn
         const totalToPay = Math.max(0, remainingBeforeDiscount - discountVal);
 
-        // 2. Tạo mã hóa đơn
+        //  Tạo mã hóa đơn
         const code = InvoiceModel.generateCode();
 
-        // 3. Tạo invoice (số tiền trên hóa đơn = số tiền CÒN PHẢI THU)
+        //  Tạo invoice (số tiền trên hóa đơn = số tiền CÒN PHẢI THU)
         const invoice = await InvoiceModel.create({
             code,
             bookingId: booking._id,
@@ -84,9 +84,9 @@ export const createInvoice = async (req, res) => {
             items.push({
                 invoiceId: invoice._id,
                 name: `Tiền sân ${booking.courtId?.name || ''}`.trim(),
-                qty: hours, // 👉 số lượng = số giờ
-                unit: 'giờ', // 👉 đơn vị = giờ
-                price: pricePerHour, // 👉 đơn giá / giờ
+                qty: hours, //  số lượng = số giờ
+                unit: 'giờ', // đơn vị = giờ
+                price: pricePerHour, // đơn giá / giờ
                 type: 'field',
                 subtotal: pricePerHour * hours, // vẫn = booking.fieldAmount
             });

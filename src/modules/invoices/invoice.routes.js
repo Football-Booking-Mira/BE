@@ -1,11 +1,13 @@
+
 import { Router } from 'express';
 import {
-    createInvoice,
-    getInvoiceByBooking,
-    getInvoiceById,
-    getInvoices,
-    updateInvoiceStatus,
+  createInvoice,
+  getInvoiceByBooking,
+  getInvoiceById,
+  getInvoices,
+  updateInvoiceStatus,
 } from './invoice.controller.js';
+
 
 const routesInvoices = Router();
 

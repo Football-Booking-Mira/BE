@@ -11,6 +11,7 @@ import { FRONT_END_URL, HOST, PORT } from './src/common/config/environment.js';
 import { connectDB } from './src/common/config/database.js';
 import setupSwagger from './src/common/config/swagger-config.js';
 import dotenv from 'dotenv';
+import startAutoCancelJob from './src/jobs/autoCancelJob.js';
 dotenv.config();
 
 connectDB();
@@ -44,6 +45,9 @@ const io = new Server(httpServer, {
 
 // Lưu socket vào app (để các controller emit được)
 app.set('io', io);
+//* Khởi động job tự hủy khi không thanh toán lại
+// Khởi động job tự hủy đơn quá hạn thanh toán
+startAutoCancelJob(app);
 
 //  SOCKET EVENTS
 io.on('connection', (socket) => {
