@@ -1164,3 +1164,103 @@ export const getBookingEquipmentsDetail = handleAsync(async (req, res, next) => 
         createResponse(true, 200, 'Lấy danh sách thiết bị của booking thành công!', items)
     );
 });
+// * ADMIN hủy đơn thanh toán tiền mặt (COD / cọc tại quầy)
+export const adminCancelCashBooking = handleAsync(async (req, res, next) => {
+    const { id } = req.params;
+    const { refundDeposit, adminReason } = req.body;
+    // refundDeposit: boolean – admin tick "Đã hoàn lại cọc cho khách"
+    // adminReason: ghi chú lý do
+
+    const admin = req.user;
+    if (!admin || admin.role !== USER_ROLES.ADMIN) {
+        return next(createError(403, 'Chỉ admin mới được hủy đơn tiền mặt!'));
+    }
+
+    const booking = await Booking.findById(id);
+    if (!booking) return next(createError(404, 'Không tìm thấy booking!'));
+
+    // Không cho hủy đơn đang dùng / đã xong
+    if ([BOOKING_STATUS.IN_USE, BOOKING_STATUS.COMPLETED].includes(booking.status)) {
+        return next(createError(400, 'Đơn đang sử dụng/đã hoàn tất, không thể hủy!'));
+    }
+
+    // Chỉ xử lý cho đơn thanh toán tiền mặt
+    if (booking.paymentMethod !== PAYMENT_METHOD.CASH) {
+        return next(
+            createError(
+                400,
+                'API này chỉ dùng cho đơn thanh toán tiền mặt/COD. Đơn online dùng luồng hoàn tiền riêng!'
+            )
+        );
+    }
+
+    //  XỬ LÝ HOÀN / GIỮ CỌC 
+    //  Đơn chỉ mới đặt cọc 50% (PARTIAL)
+    if (booking.depositAmount > 0 && booking.depositStatus === DEPOSIT_STATUS.PAID) {
+        if (refundDeposit) {
+            // admin đã TRẢ LẠI TIỀN CỌC cho khách (tiền mặt)
+            booking.depositStatus = DEPOSIT_STATUS.REFUNDED;
+            booking.paymentStatus = PAYMENT_STATUS.REFUNDED;
+            booking.refundStatus = 'refunded';
+            booking.refundProcessedAt = new Date();
+            booking.refundAdminReason =
+                adminReason?.trim() ||
+                'Admin hủy đơn thanh toán tiền mặt và đã trả lại tiền cọc cho khách';
+        } else {
+            // admin GIỮ CỌC (theo chính sách) – vẫn là PARTIAL
+            // paymentStatus giữ nguyên (thường là PARTIAL)
+            booking.refundStatus = booking.refundStatus || 'none';
+            booking.refundAdminReason =
+                adminReason?.trim() ||
+                'Admin hủy đơn, admin giữ tiền cọc theo chính sách hủy sân';
+        }
+    } else if (booking.depositAmount === 0 && booking.paymentStatus === PAYMENT_STATUS.PAID) {
+        //  Đơn đã thanh toán đủ 100% bằng tiền mặt
+        if (refundDeposit) {
+            // Ở đây refundDeposit = "ĐÃ HOÀN TIỀN CHO KHÁCH"
+            booking.paymentStatus = PAYMENT_STATUS.REFUNDED;
+            booking.refundStatus = 'refunded';
+            booking.refundProcessedAt = new Date();
+            booking.refundAdminReason =
+                adminReason?.trim() ||
+                'Admin hủy đơn thanh toán tiền mặt và đã hoàn lại toàn bộ tiền cho khách';
+        } else {
+            // CLB không hoàn tiền (theo chính sách) – PAID giữ nguyên
+            booking.refundStatus = booking.refundStatus || 'none';
+            booking.refundAdminReason =
+                adminReason?.trim() ||
+                'Admin hủy đơn, CLB không hoàn tiền (theo chính sách)';
+        }
+    } else {
+        // Đơn chưa thu đồng nào (UNPAID, deposit = 0)
+        // => Không có gì để hoàn, chỉ cần hủy
+        booking.refundStatus = booking.refundStatus || 'none';
+        if (adminReason?.trim()) {
+            booking.refundAdminReason = adminReason.trim();
+        }
+    }
+
+    //  CẬP NHẬT TRẠNG THÁI HỦY
+    booking.status = BOOKING_STATUS.CANCELLED;
+    booking.cancelledAt = new Date();
+    booking.updatedAt = new Date();
+    booking.cancelBy = USER_ROLES.ADMIN;
+
+    // Lý do hủy bên ngoài (cho cả user đọc)
+    if (adminReason?.trim()) {
+        booking.cancelReason = adminReason.trim();
+    }
+
+    await booking.save();
+
+    const io = req.app.get('io');
+    io?.emit('booking_global_updated');
+    io?.to(String(booking.courtId)).emit('booking_updated', {
+        courtId: String(booking.courtId),
+        date: booking.date.toISOString().slice(0, 10),
+    });
+
+    return res.json(
+        createResponse(true, 200, 'Admin đã hủy đơn tiền mặt và cập nhật trạng thái hoàn tiền', booking)
+    );
+});
