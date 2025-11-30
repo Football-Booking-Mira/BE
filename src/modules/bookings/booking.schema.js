@@ -13,6 +13,10 @@ export const bookingSchema = z
         paymentMethod: z.enum([PAYMENT_METHOD.VNPAY, PAYMENT_METHOD.CASH], {
             required_error: 'Vui lòng chọn phương thức thanh toán!',
         }),
+        //*Đơn tạo tại quầy admin sẽ gửi isOffline
+        isOffline: z.union([z.boolean(), z.literal('true'), z.literal('false')]).optional(),
+        //Đánh dấu đã thu tiền lúc tạo đơn (dùng cho cọc / trả full)
+        paidAtCreation: z.union([z.boolean(), z.literal('true'), z.literal('false')]).optional(),
         note: z.string().max(500).optional(),
         customerInfo: z
             .object({

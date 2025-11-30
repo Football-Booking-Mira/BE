@@ -49,6 +49,7 @@ export const PAYMENT_STATUS = {
     REFUNDED: 'refunded', //Đã hoàn tiền
 };
 export const DEPOSIT_STATUS = {
+    NONE: 'none',
     PENDING: 'pending', //chờ cọc
     PAID: 'paid', // đã cọc
     REFUNDED: 'refunded', // đã hoàn cọc

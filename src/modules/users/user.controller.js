@@ -3,7 +3,7 @@ import handleAsync from '../../utils/handleAsync.js';
 import createResponse from '../../utils/responses.js';
 import User from './user.models.js';
 import crypto from 'crypto';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 
 // GET /api/users?search=...
 export const searchUsers = handleAsync(async (req, res, next) => {

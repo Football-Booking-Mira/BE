@@ -94,12 +94,13 @@ export const createInvoice = async (req, res) => {
 
         // ===== THIẾT BỊ (mỗi thiết bị 1 dòng, đúng đơn vị cái/đôi/quả/…) =====
         const bookingItems = await BookingItem.find({ bookingId: booking._id })
-            .populate('equipmentId', 'name unit')
+            .populate('equipmentId', 'name unit mode')
             .lean();
 
         for (const bi of bookingItems) {
             const displayName = bi.name || bi.equipmentId?.name || 'Thiết bị';
             const unit = bi.unit || bi.equipmentId?.unit || 'gói';
+            const mode = bi.mode || bi.equipmentId?.mode || null;
 
             items.push({
                 invoiceId: invoice._id,
@@ -107,8 +108,9 @@ export const createInvoice = async (req, res) => {
                 qty: bi.qty,
                 unit,
                 price: bi.price,
-                // dùng chung type 'rental' cho tất cả thiết bị để không phải sửa schema
-                type: 'rental',
+                // dùng chung type 'rental' cho tất cả thiết bị
+                type: mode === 'sell' ? 'sale' : 'rental',
+                mode,
                 subtotal: bi.subtotal,
             });
         }

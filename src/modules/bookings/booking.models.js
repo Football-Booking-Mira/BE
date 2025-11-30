@@ -182,12 +182,13 @@ const BookingSchema = new Schema(
         depositStatus: {
             type: String,
             enum: Object.values(DEPOSIT_STATUS),
-            default: DEPOSIT_STATUS.PENDING, // pending|paid|refunded|forfeited
+            default: DEPOSIT_STATUS.NONE, //none| pending|paid|refunded|forfeited
         },
 
         depositMethod: {
             type: String,
             enum: Object.values(PAYMENT_METHOD), // phương thức cọc (vnpay, cash,..)
+            default: null
         },
 
         //  Mốc thời gian thực tế

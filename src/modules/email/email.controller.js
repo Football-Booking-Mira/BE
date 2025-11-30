@@ -6,8 +6,8 @@ const transporter = nodemailer.createTransport({
   port: 465,
   secure: true,
   auth: {
-    user: "thanhdajt2410@gmail.com",
-    pass: "wnat aotf lebj jcot", // mật khẩu ứng dụng Gmail
+    user: "thanhdajt2410@gmail.com", // tự điền email
+    pass: "pdyk dudv sgiq hzji", // tự điền mật khẩu ứng dụng Gmail
   },
 });
 
@@ -111,7 +111,7 @@ export const sendPaymentSuccessEmail = async (req, res) => {
       </div>
       `,
     };
-
+    //...
     await transporter.sendMail(mailOptions);
     console.log(`✅ Email đã gửi thành công tới: ${email}`);
     res.status(200).json({ message: "Gửi email thành công" });

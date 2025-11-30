@@ -25,6 +25,7 @@ import {
     addEquipmentsBooking,
     getBookingDetailAdmin,
     getBookingEquipmentsDetail,
+    adminCancelCashBooking,
 } from './booking.controller.js';
 
 const routesBooking = Router();
@@ -101,5 +102,13 @@ routesBooking.get(
     getBookingEquipmentsDetail
 );
 routesBooking.patch('/:id/checkout', authenticate, authorize(USER_ROLES.ADMIN), checkoutBooking);
+
+//admin hủy tiền cọc tại quầy
+routesBooking.post(
+    '/:id/admin-cancel-cash',
+    authenticate,
+    authorize(USER_ROLES.ADMIN),
+    adminCancelCashBooking
+);
 
 export default routesBooking;
