@@ -111,7 +111,7 @@ export const sendPaymentSuccessEmail = async (req, res) => {
       </div>
       `,
     };
-
+    //...
     await transporter.sendMail(mailOptions);
     console.log(`✅ Email đã gửi thành công tới: ${email}`);
     res.status(200).json({ message: "Gửi email thành công" });
