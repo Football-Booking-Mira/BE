@@ -46,6 +46,117 @@ export const getVouchers = handleAsync(async (req, res) => {
     return res.json(createResponse(true, 200, 'Lấy danh sách voucher thành công!', vouchers));
 });
 
+// API Public - Lấy danh sách voucher ACTIVE cho user xem
+export const getPublicVouchers = handleAsync(async (req, res) => {
+    const { limit = 20 } = req.query;
+    const now = new Date();
+
+    const filters = {
+        isDeleted: { $ne: true },
+        status: VOUCHER_STATUS.ACTIVE,
+        startDate: { $lte: now },
+        endDate: { $gte: now },
+        remainingQuantity: { $gt: 0 },
+    };
+
+    // Debug: Log để kiểm tra
+    console.log('🔍 getPublicVouchers - Filters:', JSON.stringify(filters, null, 2));
+    console.log('🔍 getPublicVouchers - Now:', now.toISOString());
+
+    const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 50);
+
+    // Lấy tất cả voucher (không filter) để debug
+    const allVouchers = await Voucher.find({ isDeleted: { $ne: true } })
+        .select('code status startDate endDate remainingQuantity')
+        .lean();
+    console.log('🔍 All vouchers in DB:', allVouchers.length);
+    console.log('🔍 Vouchers details:', JSON.stringify(allVouchers, null, 2));
+
+    const vouchers = await Voucher.find(filters)
+        .sort({ createdAt: -1 })
+        .limit(safeLimit)
+        .select(
+            'code description discountType discountValue maxDiscountValue minOrderValue remainingQuantity startDate endDate applicableCourtTypes timeRestrictions'
+        )
+        .lean();
+
+    console.log('🔍 Filtered vouchers found:', vouchers.length);
+
+    // Format lại dữ liệu để dễ hiển thị
+    const formattedVouchers = vouchers.map((v) => ({
+        code: v.code,
+        description: v.description || '',
+        discountType: v.discountType,
+        discountValue: v.discountValue,
+        maxDiscountValue: v.maxDiscountValue,
+        minOrderValue: v.minOrderValue || 0,
+        remainingQuantity: v.remainingQuantity,
+        startDate: v.startDate,
+        endDate: v.endDate,
+        applicableCourtTypes: v.applicableCourtTypes || [],
+        timeRestrictions: v.timeRestrictions || null,
+        // Tính toán hiển thị
+        discountDisplay:
+            v.discountType === DISCOUNT_TYPES.PERCENT
+                ? `${v.discountValue}%${v.maxDiscountValue ? ` (tối đa ${v.maxDiscountValue.toLocaleString('vi-VN')}đ)` : ''}`
+                : `${v.discountValue.toLocaleString('vi-VN')}đ`,
+    }));
+
+    // Debug: Log kết quả
+    console.log('🔍 getPublicVouchers - Result:', {
+        totalFound: vouchers.length,
+        formattedCount: formattedVouchers.length,
+    });
+
+    return res.json(
+        createResponse(true, 200, 'Lấy danh sách voucher thành công!', formattedVouchers)
+    );
+});
+
+// API Debug - Xem tất cả voucher (không filter) - Chỉ để debug
+export const getVouchersDebug = handleAsync(async (req, res) => {
+    const allVouchers = await Voucher.find({ isDeleted: { $ne: true } })
+        .select('code status startDate endDate remainingQuantity totalIssued createdAt')
+        .sort({ createdAt: -1 })
+        .lean();
+
+    const now = new Date();
+    const debugInfo = allVouchers.map((v) => {
+        const isActive = v.status === VOUCHER_STATUS.ACTIVE;
+        const isInTimeRange = v.startDate <= now && v.endDate >= now;
+        const hasQuantity = v.remainingQuantity > 0;
+        const canShow = isActive && isInTimeRange && hasQuantity;
+
+        return {
+            code: v.code,
+            status: v.status,
+            startDate: v.startDate,
+            endDate: v.endDate,
+            remainingQuantity: v.remainingQuantity,
+            totalIssued: v.totalIssued,
+            checks: {
+                isActive,
+                isInTimeRange,
+                hasQuantity,
+                canShow,
+            },
+            issues: [
+                !isActive && 'Status không phải ACTIVE',
+                !isInTimeRange && 'Ngoài thời gian sử dụng',
+                !hasQuantity && 'Hết số lượng',
+            ].filter(Boolean),
+        };
+    });
+
+    return res.json(
+        createResponse(true, 200, 'Debug: Danh sách tất cả voucher', {
+            total: allVouchers.length,
+            now: now.toISOString(),
+            vouchers: debugInfo,
+        })
+    );
+});
+
 export const createVoucher = handleAsync(async (req, res, next) => {
     const {
         code,
@@ -192,6 +303,8 @@ export const getVoucherStats = handleAsync(async (req, res, next) => {
 
 export default {
     getVouchers,
+    getPublicVouchers,
+    getVouchersDebug,
     createVoucher,
     validateVoucher,
     getVoucherStats,
