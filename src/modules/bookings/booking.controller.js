@@ -397,10 +397,14 @@ export const createBooking = handleAsync(async (req, res, next) => {
           endDate: voucherPayload.voucher.endDate,
         }
       : undefined,
-    voucherUsageStatus: voucherPayload ? "applied" : "none",
+    // CHỈ lưu thông tin voucher, CHƯA commit voucher usage
+    // Voucher sẽ được commit khi thanh toán thành công
+    voucherUsageStatus: voucherPayload ? "pending" : "none",
   });
 
-  if (voucherPayload) {
+  // ⭐ COMMIT VOUCHER NGAY nếu đơn offline đã thanh toán đủ (PAID)
+  // Với online booking hoặc đơn chưa thanh toán đủ, voucher sẽ được commit sau khi thanh toán thành công
+  if (voucherPayload && initialPaymentStatus === PAYMENT_STATUS.PAID) {
     try {
       const usage = await commitVoucherUsage({
         voucherId: voucherPayload.voucher._id,
@@ -410,6 +414,7 @@ export const createBooking = handleAsync(async (req, res, next) => {
         orderTotal: fieldAmount,
       });
       booking.voucherUsageId = usage._id;
+      booking.voucherUsageStatus = "applied";
       await booking.save();
     } catch (error) {
       await Booking.findByIdAndDelete(booking._id);
@@ -508,6 +513,8 @@ export const cancelBooking = handleAsync(async (req, res, next) => {
     booking.cancelNote = internalNote.trim();
   }
 
+  // ⭐ CHỈ restore voucher nếu đã commit (status = "applied")
+  // Nếu voucher chưa commit (status = "pending"), không cần restore vì chưa bị trừ lượt
   if (
     booking.voucherUsageId &&
     booking.voucherUsageStatus === "applied" &&
@@ -516,6 +523,9 @@ export const cancelBooking = handleAsync(async (req, res, next) => {
     await restoreVoucherUsage(booking);
     booking.voucherUsageStatus = "restored";
     booking.voucherRestoredAt = new Date();
+  } else if (booking.voucherUsageStatus === "pending") {
+    // Nếu voucher chưa commit, chỉ cần reset status về "none"
+    booking.voucherUsageStatus = "none";
   }
 
   await booking.save();
@@ -736,9 +746,35 @@ export const updateBooking = handleAsync(async (req, res, next) => {
   if (!booking) return next(createError(404, "Không tìm thấy booking!"));
 
   const { paymentStatus } = req.body;
+  const previousPaymentStatus = booking.paymentStatus;
 
   if (paymentStatus && Object.values(PAYMENT_STATUS).includes(paymentStatus)) {
     booking.paymentStatus = paymentStatus;
+    
+    // ⭐ COMMIT VOUCHER khi admin cập nhật payment status lên PAID
+    // Chỉ commit nếu voucher đang ở trạng thái "pending" (chưa commit)
+    if (
+      paymentStatus === PAYMENT_STATUS.PAID &&
+      previousPaymentStatus !== PAYMENT_STATUS.PAID &&
+      booking.voucherId &&
+      booking.voucherUsageStatus === "pending" &&
+      booking.customerId
+    ) {
+      try {
+        const usage = await commitVoucherUsage({
+          voucherId: booking.voucherId,
+          bookingId: booking._id,
+          userId: booking.customerId,
+          discountAmount: booking.voucherDiscount || 0,
+          orderTotal: booking.fieldAmount || 0,
+        });
+        booking.voucherUsageId = usage._id;
+        booking.voucherUsageStatus = "applied";
+      } catch (error) {
+        console.error("❌ Lỗi khi commit voucher trong updateBooking:", error.message);
+        // Không block việc cập nhật payment status
+      }
+    }
   }
 
   await booking.save();

@@ -14,6 +14,7 @@ import {
   VNP_RETURN_URL,
   FRONT_END_URL,
 } from '../../common/config/environment.js';
+import { commitVoucherUsage } from '../vouchers/voucher.service.js';
 
 // Tỉ lệ cọc so với TIỀN SÂN
 // 1= thanh toán FULL tiền sân
@@ -198,6 +199,31 @@ export const vnpayReturn = async (req, res, next) => {
         booking.paymentStatus = PAYMENT_STATUS.PARTIAL;
       } else {
         booking.paymentStatus = PAYMENT_STATUS.UNPAID;
+      }
+
+      // ⭐ COMMIT VOUCHER USAGE KHI THANH TOÁN THÀNH CÔNG
+      // Chỉ commit nếu voucher đang ở trạng thái "pending" (chưa commit)
+      if (
+        booking.voucherId &&
+        booking.voucherUsageStatus === 'pending' &&
+        booking.customerId
+      ) {
+        try {
+          const usage = await commitVoucherUsage({
+            voucherId: booking.voucherId,
+            bookingId: booking._id,
+            userId: booking.customerId,
+            discountAmount: booking.voucherDiscount || 0,
+            orderTotal: booking.fieldAmount || 0,
+          });
+          booking.voucherUsageId = usage._id;
+          booking.voucherUsageStatus = 'applied';
+        } catch (error) {
+          // Log lỗi nhưng không block thanh toán
+          console.error('❌ Lỗi khi commit voucher usage:', error.message);
+          // Voucher có thể đã hết lượt hoặc có vấn đề khác
+          // Nhưng thanh toán vẫn được ghi nhận
+        }
       }
 
       await booking.save();

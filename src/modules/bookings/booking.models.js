@@ -137,7 +137,7 @@ const BookingSchema = new Schema(
 
         voucherUsageStatus: {
             type: String,
-            enum: ['none', 'applied', 'restored', 'consumed'],
+            enum: ['none', 'pending', 'applied', 'restored', 'consumed'],
             default: 'none',
         },
 
