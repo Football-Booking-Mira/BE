@@ -123,7 +123,7 @@ export const validateVoucherForOrder = async ({
   }
 
   if (voucher.remainingQuantity <= 0) {
-    throw createError(400, "Voucher đã hết lượt sử dụng!");
+    throw createError(400, "Voucher đã hết lượt sử dụng! Vui lòng chọn voucher khác.");
   }
 
   const now = new Date();

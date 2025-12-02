@@ -219,10 +219,30 @@ export const vnpayReturn = async (req, res, next) => {
           booking.voucherUsageId = usage._id;
           booking.voucherUsageStatus = 'applied';
         } catch (error) {
-          // Log lỗi nhưng không block thanh toán
+          // ⚠️ Voucher đã hết lượt - cần xử lý lại booking
           console.error('❌ Lỗi khi commit voucher usage:', error.message);
-          // Voucher có thể đã hết lượt hoặc có vấn đề khác
-          // Nhưng thanh toán vẫn được ghi nhận
+          
+          // Nếu voucher đã hết, cần cập nhật lại booking:
+          // - Xóa thông tin voucher
+          // - Tính lại tổng tiền (không trừ voucher nữa)
+          // - Cập nhật paymentStatus nếu cần
+          if (error.statusCode === 409 || error.message?.includes('hết lượt')) {
+            booking.voucherId = null;
+            booking.voucherCode = '';
+            booking.voucherDiscount = 0;
+            booking.discountTotal = 0;
+            booking.total = booking.fieldAmount || 0;
+            booking.voucherUsageStatus = 'none';
+            
+            // Nếu đã thanh toán đủ với voucher, giờ thiếu tiền -> chuyển về PARTIAL
+            const total = booking.total;
+            if (newDeposit < total) {
+              booking.paymentStatus = PAYMENT_STATUS.PARTIAL;
+            }
+            
+            // Log để admin biết
+            console.warn(`⚠️ Voucher đã hết khi thanh toán booking ${booking.code}, đã cập nhật lại tổng tiền`);
+          }
         }
       }
 
