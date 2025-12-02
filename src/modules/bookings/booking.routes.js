@@ -78,5 +78,49 @@ routesBooking.patch('/:id/cancel', authenticate, cancelBooking);
 routesBooking.patch('/:id/confirm', authenticate, authorize(USER_ROLES.ADMIN), confirmBooking);
 routesBooking.patch('/:id/checkin', authenticate, authorize(USER_ROLES.ADMIN), checkinBooking);
 routesBooking.patch('/:id/checkout', authenticate, authorize(USER_ROLES.ADMIN), checkoutBooking);
+routesBooking.post('/payment/vietqr', async (req, res) => {
+    try {
+        const { bookingId, amount, customer } = req.body;
+
+        const response = await fetch("https://api.vietqr.io/v2/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                accountNo: "0302733686666",
+                accountName: "Nguyen Tien Manh",
+                acqId: 970422,
+                amount,
+                addInfo: `Thanh toan booking ${bookingId}`,
+                template: "compact"
+            })
+        });
+
+        const data = await response.json();
+
+        console.log("VietQR API trả về:", data);
+
+        // ❗ Nếu API lỗi hoặc không có data
+        if (!data?.data?.qrDataURL) {
+            return res.json({
+                success: false,
+                message: "Không nhận được mã QR từ VietQR!"
+            });
+        }
+
+        return res.json({
+            success: true,
+            data: {
+                qrImageBase64: data.data.qrDataURL,  // ảnh QR base64
+                qrString: data.data.qrString,        // raw string nếu cần
+                amount
+            }
+        });
+
+    } catch (e) {
+        console.log(e);
+        return res.json({ success: false, message: "Lỗi tạo VietQR" });
+    }
+});
+
 
 export default routesBooking;
