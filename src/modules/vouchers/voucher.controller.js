@@ -301,6 +301,158 @@ export const getVoucherStats = handleAsync(async (req, res, next) => {
     );
 });
 
+export const getVoucherById = handleAsync(async (req, res, next) => {
+    const { voucherId } = req.params;
+
+    const voucher = await Voucher.findOne({
+        _id: voucherId,
+        isDeleted: { $ne: true },
+    }).lean();
+
+    if (!voucher) {
+        return next(createError(404, 'Không tìm thấy voucher!'));
+    }
+
+    return res.json(
+        createResponse(true, 200, 'Lấy thông tin voucher thành công!', voucher)
+    );
+});
+
+export const updateVoucher = handleAsync(async (req, res, next) => {
+    const { voucherId } = req.params;
+    const {
+        code,
+        description,
+        discountType,
+        discountValue,
+        maxDiscountValue,
+        minOrderValue = 0,
+        totalIssued,
+        perUserLimit,
+        startDate,
+        endDate,
+        applicableCourtIds = [],
+        applicableCourtTypes = [],
+        applicableStartHour,
+        applicableEndHour,
+        status,
+    } = req.body;
+
+    const voucher = await Voucher.findOne({
+        _id: voucherId,
+        isDeleted: { $ne: true },
+    });
+
+    if (!voucher) {
+        return next(createError(404, 'Không tìm thấy voucher!'));
+    }
+
+    const normalizedCode = normalizeVoucherCode(code);
+
+    // Kiểm tra code trùng (trừ voucher hiện tại)
+    if (normalizedCode !== voucher.code) {
+        const existed = await Voucher.findOne({ code: normalizedCode });
+        if (existed) {
+            return next(createError(409, 'Mã voucher đã tồn tại!'));
+        }
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        return next(createError(400, 'Thời gian bắt đầu hoặc kết thúc không hợp lệ!'));
+    }
+    if (end <= start) {
+        return next(createError(400, 'Thời gian kết thúc phải sau thời gian bắt đầu!'));
+    }
+
+    // Kiểm tra số lượng đã sử dụng
+    const usedQuantity = voucher.totalIssued - voucher.remainingQuantity;
+    if (totalIssued < usedQuantity) {
+        return next(
+            createError(
+                400,
+                `Số lượng phát hành mới (${totalIssued}) không được nhỏ hơn số lượng đã sử dụng (${usedQuantity})!`
+            )
+        );
+    }
+
+    if (perUserLimit > totalIssued) {
+        return next(
+            createError(400, 'Giới hạn mỗi user phải nhỏ hơn hoặc bằng số lượng phát hành!')
+        );
+    }
+
+    if (discountType === DISCOUNT_TYPES.PERCENT) {
+        if (discountValue > 100) {
+            return next(createError(400, 'Voucher giảm % không được vượt quá 100!'));
+        }
+        if (typeof maxDiscountValue !== 'number') {
+            return next(createError(400, 'Vui lòng nhập giá trị giảm tối đa cho voucher %!'));
+        }
+    }
+
+    const courtIds = ensureValidCourts(applicableCourtIds);
+    const courtTypes = Array.isArray(applicableCourtTypes)
+        ? [...new Set(applicableCourtTypes)]
+        : [];
+
+    // Cập nhật remainingQuantity nếu totalIssued thay đổi
+    const newRemainingQuantity =
+        totalIssued - usedQuantity >= 0 ? totalIssued - usedQuantity : voucher.remainingQuantity;
+
+    voucher.code = normalizedCode;
+    voucher.description = description?.trim() || '';
+    voucher.discountType = discountType;
+    voucher.discountValue = discountValue;
+    voucher.maxDiscountValue = discountType === DISCOUNT_TYPES.PERCENT ? maxDiscountValue : null;
+    voucher.minOrderValue = typeof minOrderValue === 'number' ? minOrderValue : 0;
+    voucher.totalIssued = totalIssued;
+    voucher.remainingQuantity = newRemainingQuantity;
+    voucher.perUserLimit = perUserLimit;
+    voucher.startDate = start;
+    voucher.endDate = end;
+    voucher.applicableCourtIds = courtIds;
+    voucher.applicableCourtTypes = courtTypes;
+    voucher.timeRestrictions =
+        typeof applicableStartHour === 'number' && typeof applicableEndHour === 'number'
+            ? {
+                  startHour: applicableStartHour,
+                  endHour: applicableEndHour,
+              }
+            : undefined;
+    if (status !== undefined) {
+        voucher.status = status;
+    }
+
+    await voucher.save();
+
+    return res.json(
+        createResponse(true, 200, 'Cập nhật voucher thành công!', voucher.toObject())
+    );
+});
+
+export const deleteVoucher = handleAsync(async (req, res, next) => {
+    const { voucherId } = req.params;
+
+    const voucher = await Voucher.findOne({
+        _id: voucherId,
+        isDeleted: { $ne: true },
+    });
+
+    if (!voucher) {
+        return next(createError(404, 'Không tìm thấy voucher!'));
+    }
+
+    // Soft delete
+    voucher.isDeleted = true;
+    voucher.status = VOUCHER_STATUS.INACTIVE;
+    await voucher.save();
+
+    return res.json(createResponse(true, 200, 'Xóa voucher thành công!', null));
+});
+
 export default {
     getVouchers,
     getPublicVouchers,
@@ -308,5 +460,8 @@ export default {
     createVoucher,
     validateVoucher,
     getVoucherStats,
+    getVoucherById,
+    updateVoucher,
+    deleteVoucher,
 };
 

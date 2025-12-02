@@ -4,10 +4,13 @@ import { authenticate, authorize } from '../../common/middlewares/auth.middlewar
 import validBodyRequest from '../../common/middlewares/validBodyRequest.js';
 import {
     createVoucher,
+    deleteVoucher,
     getPublicVouchers,
+    getVoucherById,
     getVoucherStats,
     getVouchers,
     getVouchersDebug,
+    updateVoucher,
     validateVoucher,
 } from './voucher.controller.js';
 import { voucherSchema } from './voucher.schema.js';
@@ -44,6 +47,28 @@ voucherRoutes.get(
     authenticate,
     authorize(USER_ROLES.ADMIN),
     getVoucherStats
+);
+
+voucherRoutes.get(
+    '/:voucherId',
+    authenticate,
+    authorize(USER_ROLES.ADMIN),
+    getVoucherById
+);
+
+voucherRoutes.put(
+    '/:voucherId',
+    authenticate,
+    authorize(USER_ROLES.ADMIN),
+    validBodyRequest(voucherSchema),
+    updateVoucher
+);
+
+voucherRoutes.delete(
+    '/:voucherId',
+    authenticate,
+    authorize(USER_ROLES.ADMIN),
+    deleteVoucher
 );
 
 export default voucherRoutes;
