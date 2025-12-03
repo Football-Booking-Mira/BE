@@ -431,6 +431,127 @@ export const cancelBooking = handleAsync(async (req, res, next) => {
     return res.json(createResponse(true, 200, ' Hủy booking thành công!', booking));
 });
 
+export const createMultiBooking = handleAsync(async (req, res, next) => {
+    const {
+        courtId,
+        customerId,
+        date,
+        timeSlots,
+        paymentMethod,
+        note,
+        isOffline,
+        customerInfo,
+        paidAtCreation,
+    } = req.body;
+
+    if (!courtId || !date || !timeSlots || !Array.isArray(timeSlots) || timeSlots.length === 0) {
+        return next(createError(400, 'Thiếu sân, ngày hoặc danh sách khung giờ!'));
+    }
+
+    const court = await Court.findById(courtId);
+    if (!court) return next(createError(404, 'Không tìm thấy sân!'));
+
+    // Lấy role từ JWT (nếu có), mặc định là user
+    const roleFromToken = (req.user?.role || USER_ROLES.USER).toLowerCase();
+    const isOfflineMode =
+        isOffline === true || isOffline === 'true' || roleFromToken === USER_ROLES.ADMIN;
+    const createdBy = isOfflineMode ? USER_ROLES.ADMIN : roleFromToken;
+    const finalCustomerId =
+        createdBy === USER_ROLES.ADMIN ? customerId || null : req.user?._id || customerId || null;
+
+    // Trạng thái thanh toán ban đầu
+    let initialPaymentStatus = PAYMENT_STATUS.UNPAID;
+    if (
+        isOfflineMode && // đơn tại quầy
+        paymentMethod === PAYMENT_METHOD.CASH &&
+        paidAtCreation === true // đã thu tiền luôn
+    ) {
+        initialPaymentStatus = PAYMENT_STATUS.PAID;
+    }
+
+    const createdBookings = [];
+
+    // chuẩn hóa ngày để query theo ngày (set giờ về 00:00)
+    const day = new Date(date);
+    if (Number.isNaN(day.getTime())) return next(createError(400, 'Ngày đặt không hợp lệ!'));
+    day.setHours(0, 0, 0, 0);
+    const nextDay = new Date(day);
+    nextDay.setDate(day.getDate() + 1);
+
+    for (const slot of timeSlots) {
+        const { startTime, endTime } = slot || {};
+        if (!startTime || !endTime) {
+            return next(createError(400, 'Mỗi slot phải có startTime và endTime!'));
+        }
+
+        // Tính tiền & slot count theo ca
+        const { slotCount, fieldAmount, totalHours } = calcFieldPriceBySlots(startTime, endTime, court);
+
+        if (slotCount === 0) {
+            return next(
+                createError(
+                    400,
+                    `Khung giờ ${startTime} - ${endTime} không hợp lệ hoặc nằm ngoài giờ hoạt động!`
+                )
+            );
+        }
+
+        // Kiểm tra trùng giờ cho slot hiện tại
+        const hasOverlap = await Booking.findOne({
+            courtId,
+            date: { $gte: day, $lt: nextDay },
+            status: { $ne: BOOKING_STATUS.CANCELLED },
+            startTime: { $lt: endTime },
+            endTime: { $gt: startTime },
+        });
+
+        if (hasOverlap) {
+            return next(
+                createError(400, `Khung giờ ${startTime} - ${endTime} đã có người đặt trên sân này!`)
+            );
+        }
+
+        // status ban đầu
+        const initialStatus = isOfflineMode ? BOOKING_STATUS.CONFIRMED : BOOKING_STATUS.PENDING;
+
+        const booking = await Booking.create({
+            code: `BK${Date.now().toString().slice(-6)}${Math.floor(Math.random() * 90 + 10)}`,
+            courtId,
+            customerId: finalCustomerId,
+            customerInfo: {
+                name: customerInfo?.name?.trim() || '',
+                phone: customerInfo?.phone?.trim() || '',
+                email: customerInfo?.email?.trim() || '',
+            },
+            date,
+            startTime,
+            endTime,
+            hours: totalHours,
+            fieldAmount,
+            equipmentTotal: 0,
+            discountTotal: 0,
+            total: fieldAmount,
+            paymentMethod,
+            notes: note || '',
+            status: initialStatus,
+            paymentStatus: initialPaymentStatus,
+            createdBy,
+        });
+
+        createdBookings.push(booking);
+
+        // emit realtime cho sân / admin
+        const io = req.app.get('io');
+        io?.emit('booking_global_updated');
+        io?.to(String(courtId)).emit('booking_updated', {
+            courtId: String(courtId),
+            date: new Date(date).toISOString().slice(0, 10),
+        });
+    }
+
+    return res.status(201).json(createResponse(true, 201, 'Tạo booking thành công!', createdBookings));
+});
+
 // * ADMIN xác nhận
 export const confirmBooking = handleAsync(async (req, res, next) => {
     const booking = await Booking.findById(req.params.id);

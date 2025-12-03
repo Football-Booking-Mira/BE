@@ -3,6 +3,7 @@ import { USER_ROLES } from '../../common/constants/enums.js';
 import { authenticate, authorize } from '../../common/middlewares/auth.middleware.js';
 import validBodyRequest from '../../common/middlewares/validBodyRequest.js';
 import { bookingSchema } from './booking.schema.js';
+import { multiBookingSchema } from './booking.schema.js';
 
 import {
     createBooking,
@@ -26,6 +27,7 @@ import {
     getBookingDetailAdmin,
     getBookingEquipmentsDetail,
     adminCancelCashBooking,
+    createMultiBooking
 } from './booking.controller.js';
 
 const routesBooking = Router();
@@ -34,6 +36,13 @@ routesBooking
     .route('/')
     .post(authenticate, validBodyRequest(bookingSchema), createBooking)
     .get(authenticate, getBookings);
+
+routesBooking.post(
+    '/multi',
+    authenticate,
+    validBodyRequest(multiBookingSchema),
+    createMultiBooking
+);
 
 routesBooking.get('/user/:userId', authenticate, getBookingsByUser);
 routesBooking.get('/court/:courtId', getBookingsByCourt);

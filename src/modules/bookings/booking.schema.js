@@ -42,3 +42,8 @@ export const bookingSchema = z
             });
         }
     });
+export const multiBookingSchema = z.object({
+    bookings: z.array(
+        bookingSchema
+    ).min(1, 'Vui lòng chọn ít nhất 1 khung giờ!')
+});
