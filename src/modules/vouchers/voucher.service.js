@@ -136,11 +136,10 @@ export const validateVoucherForOrder = async ({
   }
 
   if (voucher.minOrderValue && amount < voucher.minOrderValue) {
+    const formattedMin = voucher.minOrderValue.toLocaleString("vi-VN");
     throw createError(
       400,
-      `Đơn hàng phải đạt tối thiểu ${voucher.minOrderValue.toLocaleString(
-        "vi-VN"
-      )}đ để dùng voucher!`
+      `Đơn của bạn không đủ điều kiện sử dụng voucher. Đơn phải từ ${formattedMin}đ trở lên để dùng voucher này!`
     );
   }
 

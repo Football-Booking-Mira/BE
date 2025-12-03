@@ -5,6 +5,7 @@ import handleAsync from '../../utils/handleAsync.js';
 import createResponse from '../../utils/responses.js';
 import { Court } from '../courts/court.models.js';
 import Voucher from './voucher.models.js';
+import VoucherUsage from './voucherUsage.models.js';
 import {
     getVoucherStatsData,
     normalizeVoucherCode,
@@ -436,21 +437,18 @@ export const updateVoucher = handleAsync(async (req, res, next) => {
 export const deleteVoucher = handleAsync(async (req, res, next) => {
     const { voucherId } = req.params;
 
-    const voucher = await Voucher.findOne({
-        _id: voucherId,
-        isDeleted: { $ne: true },
-    });
+    // Xóa hẳn voucher khỏi database (hard delete)
+    // Đồng thời dọn các bản ghi usage liên quan để tránh dữ liệu mồ côi
+    const voucher = await Voucher.findOne({ _id: voucherId });
 
     if (!voucher) {
         return next(createError(404, 'Không tìm thấy voucher!'));
     }
 
-    // Soft delete
-    voucher.isDeleted = true;
-    voucher.status = VOUCHER_STATUS.INACTIVE;
-    await voucher.save();
+    await VoucherUsage.deleteMany({ voucherId: voucher._id });
+    await Voucher.deleteOne({ _id: voucher._id });
 
-    return res.json(createResponse(true, 200, 'Xóa voucher thành công!', null));
+    return res.json(createResponse(true, 200, 'Xóa voucher (hard delete) thành công!', null));
 });
 
 export default {
