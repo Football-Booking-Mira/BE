@@ -216,6 +216,39 @@ export const restoreVoucherUsage = async (booking) => {
   return usage;
 };
 
+/**
+ * Rollback voucher usage - Hủy việc sử dụng voucher
+ * Dùng khi cần rollback voucher đã commit
+ */
+export const rollbackVoucherUsage = async (voucherId, userId, bookingId) => {
+  if (!voucherId || !userId || !bookingId) {
+    throw createError(400, "Thiếu thông tin để rollback voucher!");
+  }
+
+  const usage = await VoucherUsage.findOne({
+    voucherId,
+    userId,
+    bookingId,
+    status: "applied",
+  });
+
+  if (!usage) {
+    return null; // Không tìm thấy usage để rollback
+  }
+
+  // Cập nhật status thành restored
+  usage.status = "restored";
+  usage.restoredAt = new Date();
+  await usage.save();
+
+  // Tăng lại remainingQuantity và giảm usageCount
+  await Voucher.findByIdAndUpdate(voucherId, {
+    $inc: { remainingQuantity: 1, usageCount: -1 },
+  });
+
+  return usage;
+};
+
 export const getVoucherStatsData = async (voucherId) => {
   if (!isValidObjectId(voucherId))
     throw createError(400, "Voucher không hợp lệ!");
