@@ -14,7 +14,7 @@ import {
   VNP_RETURN_URL,
   FRONT_END_URL,
 } from '../../common/config/environment.js';
-import { commitVoucherUsage } from '../vouchers/voucher.service.js';
+import { commitVoucherUsage, rollbackVoucherUsage } from '../vouchers/voucher.service.js';
 
 // Tỉ lệ cọc so với TIỀN SÂN
 // 1= thanh toán FULL tiền sân
@@ -105,6 +105,48 @@ export const createVnpayPayment = async (req, res, next) => {
       return res
         .status(400)
         .json({ success: false, message: 'Số tiền thanh toán không hợp lệ!' });
+    }
+
+    // ⭐ COMMIT VOUCHER NGAY KHI TẠO PAYMENT URL (FIRST-COME-FIRST-SERVED)
+    // Chỉ commit cho booking mới (không phải retry payment) và có voucher ở trạng thái "pending"
+    if (
+      !isRetryPayment &&
+      booking.voucherId &&
+      booking.voucherUsageStatus === 'pending' &&
+      booking.customerId
+    ) {
+      try {
+        const usage = await commitVoucherUsage({
+          voucherId: booking.voucherId,
+          bookingId: booking._id,
+          userId: booking.customerId,
+          discountAmount: booking.voucherDiscount || 0,
+          orderTotal: booking.fieldAmount || 0,
+        });
+        booking.voucherUsageId = usage._id;
+        booking.voucherUsageStatus = 'applied';
+        await booking.save();
+      } catch (error) {
+        // ⚠️ Voucher đã hết lượt - trả về lỗi yêu cầu chọn voucher khác
+        const isOutOfUsage =
+          error.statusCode === 409 ||
+          error.message?.includes('hết lượt') ||
+          error.message?.includes('hết lượt sử dụng');
+
+        if (isOutOfUsage) {
+          return res.status(409).json({
+            success: false,
+            message: `Voucher "${booking.voucherCode || ''}" đã hết lượt sử dụng, vui lòng chọn voucher khác.`,
+            code: 'VOUCHER_OUT_OF_STOCK',
+          });
+        }
+
+        // Lỗi khác - trả về lỗi chung
+        return res.status(400).json({
+          success: false,
+          message: error.message || 'Không thể áp dụng voucher. Vui lòng thử lại.',
+        });
+      }
     }
 
     const orderId = booking.code;
@@ -205,64 +247,38 @@ export const vnpayReturn = async (req, res, next) => {
         booking.paymentStatus = PAYMENT_STATUS.UNPAID;
       }
 
-      // ⭐ COMMIT VOUCHER USAGE KHI THANH TOÁN THÀNH CÔNG
-      // Chỉ commit nếu voucher đang ở trạng thái "pending" (chưa commit)
-      if (
-        booking.voucherId &&
-        booking.voucherUsageStatus === 'pending' &&
-        booking.customerId
-      ) {
-        try {
-          const usage = await commitVoucherUsage({
-            voucherId: booking.voucherId,
-            bookingId: booking._id,
-            userId: booking.customerId,
-            discountAmount: booking.voucherDiscount || 0,
-            orderTotal: booking.fieldAmount || 0,
-          });
-          booking.voucherUsageId = usage._id;
-          booking.voucherUsageStatus = 'applied';
-          voucherStatus = 'applied';
-        } catch (error) {
-          // ⚠️ Voucher đã hết lượt hoặc lỗi khi commit - cần xử lý lại booking
-          console.error('❌ Lỗi khi commit voucher usage:', error.message);
-
-          const isOutOfUsage =
-            error.statusCode === 409 ||
-            error.message?.includes('hết lượt') ||
-            error.message?.includes('hết lượt sử dụng');
-
-          if (isOutOfUsage) {
-            voucherStatus = 'expired';
-            voucherErrorMessage =
-              'Voucher bạn chọn đã hết lượt sử dụng trong lúc thanh toán. Hệ thống đã tính lại tổng tiền không áp dụng voucher.';
-
-            // Nếu voucher đã hết, cần cập nhật lại booking:
-            // - Xóa thông tin voucher
-            // - Tính lại tổng tiền (không trừ voucher nữa)
-            // - Cập nhật paymentStatus nếu cần
-            booking.voucherId = null;
-            booking.voucherCode = '';
-            booking.voucherDiscount = 0;
-            booking.discountTotal = 0;
-            booking.total = booking.fieldAmount || 0;
-            booking.voucherUsageStatus = 'none';
-
-            // Nếu đã thanh toán đủ với voucher, giờ thiếu tiền -> chuyển về PARTIAL
-            const totalRecalculated = booking.total;
-            if (newDeposit < totalRecalculated) {
-              booking.paymentStatus = PAYMENT_STATUS.PARTIAL;
-            }
-
-            // Log để admin biết
-            console.warn(
-              `⚠️ Voucher đã hết khi thanh toán booking ${booking.code}, đã cập nhật lại tổng tiền`
-            );
-          }
-        }
+      // Voucher đã được commit ở createVnpayPayment, không cần commit lại ở đây
+      // Chỉ cập nhật status nếu cần
+      if (booking.voucherUsageStatus === 'applied') {
+        voucherStatus = 'applied';
       }
 
       await booking.save();
+    } else {
+      // ⚠️ THANH TOÁN THẤT BẠI - ROLLBACK VOUCHER
+      // Nếu voucher đã được commit (status = 'applied'), cần rollback
+      if (
+        booking.voucherId &&
+        booking.voucherUsageStatus === 'applied' &&
+        booking.voucherUsageId &&
+        booking.customerId
+      ) {
+        try {
+          await rollbackVoucherUsage(
+            booking.voucherId,
+            booking.customerId,
+            booking._id
+          );
+          booking.voucherUsageStatus = 'restored';
+          booking.voucherRestoredAt = new Date();
+          await booking.save();
+          console.log(
+            `✅ Đã rollback voucher cho booking ${booking.code} do thanh toán thất bại`
+          );
+        } catch (error) {
+          console.error('❌ Lỗi khi rollback voucher:', error.message);
+        }
+      }
     }
 
     // Bắn socket cho FE cập nhật lịch sân

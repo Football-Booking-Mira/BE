@@ -398,12 +398,13 @@ export const createBooking = handleAsync(async (req, res, next) => {
         }
       : undefined,
     // CHỈ lưu thông tin voucher, CHƯA commit voucher usage
-    // Voucher sẽ được commit khi thanh toán thành công
+    // - Online booking: Voucher sẽ được commit ở createVnpayPayment (first-come-first-served)
+    // - Offline booking đã thanh toán đủ: Voucher sẽ được commit ngay ở đây
     voucherUsageStatus: voucherPayload ? "pending" : "none",
   });
 
   // ⭐ COMMIT VOUCHER NGAY nếu đơn offline đã thanh toán đủ (PAID)
-  // Với online booking hoặc đơn chưa thanh toán đủ, voucher sẽ được commit sau khi thanh toán thành công
+  // Với online booking, voucher sẽ được commit ở createVnpayPayment (khi bấm "Hoàn tất thanh toán")
   if (voucherPayload && initialPaymentStatus === PAYMENT_STATUS.PAID) {
     try {
       const usage = await commitVoucherUsage({
