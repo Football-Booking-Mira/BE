@@ -9,6 +9,7 @@ import routesBookingItem from "../modules/bookingItems/bookingItem.routes.js";
 import userRouter from "../modules/users/user.routes.js";
 import uploadRoutes from "../common/routes/upload.routes.js";
 import emailRoutes from "../modules/email/email.routes.js";
+import routesReport from "../modules/reports/report.routes.js";
 
 const routes = Router();
 
@@ -23,5 +24,6 @@ routes.use("/users", userRouter);
 // upload ảnh đăng ký user,bill chuyển tiền
 routes.use("/upload", uploadRoutes);
 routes.use("/email", emailRoutes);
+routes.use("/reports", routesReport);
 
 export default routes;
