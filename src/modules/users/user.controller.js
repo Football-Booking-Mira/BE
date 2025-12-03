@@ -4,6 +4,7 @@ import createResponse from '../../utils/responses.js';
 import User from './user.models.js';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
+import sendMail from '../../utils/sendEmail.js';
 
 // GET /api/users?search=...
 export const searchUsers = handleAsync(async (req, res, next) => {
@@ -24,52 +25,147 @@ export const searchUsers = handleAsync(async (req, res, next) => {
         .json(createResponse(true, StatusCodes.OK, 'Lấy danh sách khách hàng thành công', users));
 });
 
-// POST /api/users  (tạo khách tại quầy)
-export const createOfflineCustomer = handleAsync(async (req, res, next) => {
-    const { name, phone, email } = req.body; // body đã được zod validate rồi
+export const generateRandomPassword = (length = 10) => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$!';
+    let pass = '';
+    for (let i = 0; i < length; i++) {
+        pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return pass;
+};
 
-    // kiểm tra trùng SĐT
+export const htmlSendPassword = (name, password, email) => {
+    return `
+        <div style="font-family: Arial; line-height: 1.6;">
+            <h3>Xin chào ${name},</h3>
+            <p>Tài khoản của bạn đã được tạo thành công.</p>
+            <p><b>Email:</b> ${email}</p>
+            <p><b>Mật khẩu đăng nhập:</b></p>
+            <div style="padding: 10px; background: #f5f5f5; font-size: 18px; display: inline-block; border-radius: 6px;">
+                ${password}
+            </div>
+            <p>Vui lòng đăng nhập và đổi mật khẩu ngay để bảo mật tài khoản.</p>
+            <br>
+            <p>Trân trọng,</p>
+            <p>Support Team</p>
+        </div>
+    `;
+};
+
+
+export const htmlOfflineCustomerPassword = (name, email, password) => {
+    return `
+        <div style="font-family: Arial; line-height: 1.6;">
+            <h2>Xin chào ${name},</h2>
+            <p>Bạn vừa được tạo tài khoản tại hệ thống của chúng tôi.</p>
+            <p>Thông tin đăng nhập của bạn:</p>
+            <p><b>Email:</b> ${email}</p>
+            <p><b>Mật khẩu:</b> ${password}</p>
+            <br/>
+            <p>Vui lòng đăng nhập và thay đổi mật khẩu để bảo mật.</p>
+            <br/>
+            <p>Trân trọng,</p>
+            <p>Support Team</p>
+        </div>
+    `;
+};
+
+
+// POST /api/users  (tạo khách tại quầy)
+// export const createOfflineCustomer = handleAsync(async (req, res, next) => {
+//     const { name, phone, email } = req.body; // body đã được zod validate rồi
+
+//     // kiểm tra trùng SĐT
+//     const existedPhone = await User.findOne({ phone });
+//     if (existedPhone) {
+//         return res
+//             .status(StatusCodes.BAD_REQUEST)
+//             .json(
+//                 createResponse(
+//                     false,
+//                     StatusCodes.BAD_REQUEST,
+//                     'Số điện thoại đã tồn tại, vui lòng dùng SĐT khác!'
+//                 )
+//             );
+//     }
+
+//     // kiểm tra trùng email (nếu có)
+//     if (email) {
+//         const existedEmail = await User.findOne({ email });
+//         if (existedEmail) {
+//             return res
+//                 .status(StatusCodes.BAD_REQUEST)
+//                 .json(
+//                     createResponse(
+//                         false,
+//                         StatusCodes.BAD_REQUEST,
+//                         'Email đã được sử dụng trước đó!'
+//                     )
+//                 );
+//         }
+//     }
+
+//     const user = await User.create({
+//         name,
+//         phone,
+//         email: email || '',
+//         role: 'user',
+//         status: 'active', // khách tạo tại quầy cho phép dùng luôn
+//         isEmailVerified: false,
+//     });
+
+//     return res
+//         .status(StatusCodes.CREATED)
+//         .json(createResponse(true, StatusCodes.CREATED, 'Tạo khách hàng mới thành công', user));
+// });
+export const createOfflineCustomer = handleAsync(async (req, res) => {
+    const { name, phone, email } = req.body;
+
+    // Kiểm tra trùng SĐT
     const existedPhone = await User.findOne({ phone });
     if (existedPhone) {
         return res
             .status(StatusCodes.BAD_REQUEST)
-            .json(
-                createResponse(
-                    false,
-                    StatusCodes.BAD_REQUEST,
-                    'Số điện thoại đã tồn tại, vui lòng dùng SĐT khác!'
-                )
-            );
+            .json(createResponse(false, StatusCodes.BAD_REQUEST, 'Số điện thoại đã tồn tại, vui lòng dùng SĐT khác!'));
     }
 
-    // kiểm tra trùng email (nếu có)
+    // Kiểm tra trùng email
     if (email) {
         const existedEmail = await User.findOne({ email });
         if (existedEmail) {
             return res
                 .status(StatusCodes.BAD_REQUEST)
-                .json(
-                    createResponse(
-                        false,
-                        StatusCodes.BAD_REQUEST,
-                        'Email đã được sử dụng trước đó!'
-                    )
-                );
+                .json(createResponse(false, StatusCodes.BAD_REQUEST, 'Email đã được sử dụng trước đó!'));
         }
     }
 
+    // === 1) Tạo mật khẩu ngẫu nhiên ===
+    const rawPassword = generateRandomPassword(10);
+    const hashedPassword = await bcrypt.hash(rawPassword, 10);
+
+    // === 2) Tạo user ===
     const user = await User.create({
         name,
         phone,
         email: email || '',
+        password: hashedPassword,
         role: 'user',
-        status: 'active', // khách tạo tại quầy cho phép dùng luôn
+        status: 'active',
         isEmailVerified: false,
     });
 
+    // === 3) Gửi mật khẩu qua email (nếu có email) ===
+    if (email) {
+        await sendMail({
+            to: email,
+            subject: `Tài khoản của bạn đã được tạo #${email}`,
+            html: htmlSendPassword(name, rawPassword, email),
+        });
+    }
+
     return res
         .status(StatusCodes.CREATED)
-        .json(createResponse(true, StatusCodes.CREATED, 'Tạo khách hàng mới thành công', user));
+        .json(createResponse(true, StatusCodes.CREATED, 'Tạo khách hàng mới thành công, mật khẩu đã được gửi qua email', user));
 });
 
 export const registerOnlineUser = handleAsync(async (req, res) => {
