@@ -10,6 +10,8 @@ import userRouter from "../modules/users/user.routes.js";
 import uploadRoutes from "../common/routes/upload.routes.js";
 import voucherRoutes from "../modules/vouchers/voucher.routes.js";
 
+import routesReport from "../modules/reports/report.routes.js";
+
 const routes = Router();
 
 routes.use("/courts", routesCourt);
@@ -22,14 +24,6 @@ routes.use("/booking-items", routesBookingItem);
 routes.use("/users", userRouter);
 routes.use("/upload", uploadRoutes);
 routes.use("/vouchers", voucherRoutes);
-
-// Bắt tất cả route không tồn tại
-routes.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    statusCode: 404,
-    message: "ROUTE NOT FOUND",
-  });
-});
+routes.use("/reports", routesReport);
 
 export default routes;

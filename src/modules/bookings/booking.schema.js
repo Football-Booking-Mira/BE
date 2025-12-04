@@ -10,7 +10,7 @@ export const bookingSchema = z
         }),
         startTime: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Định dạng giờ phải là HH:mm'),
         endTime: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Định dạng giờ phải là HH:mm'),
-        paymentMethod: z.enum([PAYMENT_METHOD.VNPAY, PAYMENT_METHOD.CASH], {
+        paymentMethod: z.enum([PAYMENT_METHOD.VNPAY, PAYMENT_METHOD.CASH, PAYMENT_METHOD.TRANSFER], {
             required_error: 'Vui lòng chọn phương thức thanh toán!',
         }),
         //*Đơn tạo tại quầy admin sẽ gửi isOffline
@@ -49,3 +49,8 @@ export const bookingSchema = z
             });
         }
     });
+export const multiBookingSchema = z.object({
+    bookings: z.array(
+        bookingSchema
+    ).min(1, 'Vui lòng chọn ít nhất 1 khung giờ!')
+});
