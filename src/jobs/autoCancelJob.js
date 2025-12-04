@@ -23,6 +23,28 @@ function startAutoCancelJob(app) {
                 booking.cancelBy = null;
                 booking.cancelReason = 'Hết thời gian thanh toán online (5 phút), đơn tự động hủy.';
                 booking.cancelledAt = now;
+                
+                // ⭐ Voucher chưa commit (status = "pending") thì không cần restore
+                // Vì voucher chưa bị trừ lượt sử dụng
+                // Chỉ restore nếu đã commit (status = "applied")
+                if (
+                    booking.voucherUsageId &&
+                    booking.voucherUsageStatus === 'applied'
+                ) {
+                    // Import restoreVoucherUsage ở đây để tránh circular dependency
+                    const { restoreVoucherUsage } = await import('../modules/vouchers/voucher.service.js');
+                    try {
+                        await restoreVoucherUsage(booking);
+                        booking.voucherUsageStatus = 'restored';
+                        booking.voucherRestoredAt = now;
+                    } catch (error) {
+                        console.error('❌ Lỗi khi restore voucher trong autoCancelJob:', error.message);
+                    }
+                } else if (booking.voucherUsageStatus === 'pending') {
+                    // Nếu voucher chưa commit, chỉ cần reset status về "none"
+                    booking.voucherUsageStatus = 'none';
+                }
+                
                 await booking.save();
 
                 // bắn realtime cho FE

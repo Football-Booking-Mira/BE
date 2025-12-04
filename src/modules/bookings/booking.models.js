@@ -100,6 +100,52 @@ const BookingSchema = new Schema(
             min: 0, // thành tiền cuối cùng sau giảm
         },
 
+        voucherId: {
+            type: ObjectId,
+            ref: 'Voucher',
+            default: null,
+        },
+
+        voucherCode: {
+            type: String,
+            trim: true,
+            uppercase: true,
+            default: '',
+        },
+
+        voucherDiscount: {
+            type: Number,
+            min: 0,
+            default: 0,
+        },
+
+        voucherSnapshot: {
+            discountType: { type: String },
+            discountValue: { type: Number },
+            maxDiscountValue: { type: Number },
+            minOrderValue: { type: Number },
+            perUserLimit: { type: Number },
+            startDate: { type: Date },
+            endDate: { type: Date },
+        },
+
+        voucherUsageId: {
+            type: ObjectId,
+            ref: 'VoucherUsage',
+            default: null,
+        },
+
+        voucherUsageStatus: {
+            type: String,
+            enum: ['none', 'pending', 'applied', 'restored', 'consumed'],
+            default: 'none',
+        },
+
+        voucherRestoredAt: {
+            type: Date,
+            default: null,
+        },
+
         createdBy: {
             type: String,
             enum: [USER_ROLES.ADMIN, USER_ROLES.USER],

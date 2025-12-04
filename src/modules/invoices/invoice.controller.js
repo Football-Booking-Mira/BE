@@ -161,6 +161,7 @@ export const getInvoiceByBooking = async (req, res) => {
                 populate: [
                     { path: 'customerId', model: 'User' },
                     { path: 'courtId', model: 'Court' },
+                    { path: 'voucherId', model: 'Voucher', select: 'code discountType discountValue maxDiscountValue' },
                 ],
             })
             .populate('customerId');

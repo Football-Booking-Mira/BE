@@ -14,6 +14,7 @@ import {
   VNP_RETURN_URL,
   FRONT_END_URL,
 } from '../../common/config/environment.js';
+import { commitVoucherUsage, rollbackVoucherUsage } from '../vouchers/voucher.service.js';
 
 // Tỉ lệ cọc so với TIỀN SÂN
 // 1= thanh toán FULL tiền sân
@@ -106,6 +107,48 @@ export const createVnpayPayment = async (req, res, next) => {
         .json({ success: false, message: 'Số tiền thanh toán không hợp lệ!' });
     }
 
+    // ⭐ COMMIT VOUCHER NGAY KHI TẠO PAYMENT URL (FIRST-COME-FIRST-SERVED)
+    // Chỉ commit cho booking mới (không phải retry payment) và có voucher ở trạng thái "pending"
+    if (
+      !isRetryPayment &&
+      booking.voucherId &&
+      booking.voucherUsageStatus === 'pending' &&
+      booking.customerId
+    ) {
+      try {
+        const usage = await commitVoucherUsage({
+          voucherId: booking.voucherId,
+          bookingId: booking._id,
+          userId: booking.customerId,
+          discountAmount: booking.voucherDiscount || 0,
+          orderTotal: booking.fieldAmount || 0,
+        });
+        booking.voucherUsageId = usage._id;
+        booking.voucherUsageStatus = 'applied';
+        await booking.save();
+      } catch (error) {
+        // ⚠️ Voucher đã hết lượt - trả về lỗi yêu cầu chọn voucher khác
+        const isOutOfUsage =
+          error.statusCode === 409 ||
+          error.message?.includes('hết lượt') ||
+          error.message?.includes('hết lượt sử dụng');
+
+        if (isOutOfUsage) {
+          return res.status(409).json({
+            success: false,
+            message: `Voucher "${booking.voucherCode || ''}" đã hết lượt sử dụng, vui lòng chọn voucher khác.`,
+            code: 'VOUCHER_OUT_OF_STOCK',
+          });
+        }
+
+        // Lỗi khác - trả về lỗi chung
+        return res.status(400).json({
+          success: false,
+          message: error.message || 'Không thể áp dụng voucher. Vui lòng thử lại.',
+        });
+      }
+    }
+
     const orderId = booking.code;
     const createDate = new Date()
       .toISOString()
@@ -182,6 +225,10 @@ export const vnpayReturn = async (req, res, next) => {
     }
 
     //  Ghi nhận tiền đã thanh toán (cộng dồn cọc + cập nhật paymentStatus)
+    // Cờ theo dõi trạng thái voucher trong quá trình thanh toán
+    let voucherStatus = 'none'; // none | applied | expired
+    let voucherErrorMessage = '';
+
     if (rspCode === '00' && paidAmount > 0) {
       const oldDeposit = Number(booking.depositAmount || 0);
       const newDeposit = oldDeposit + paidAmount;
@@ -200,7 +247,38 @@ export const vnpayReturn = async (req, res, next) => {
         booking.paymentStatus = PAYMENT_STATUS.UNPAID;
       }
 
+      // Voucher đã được commit ở createVnpayPayment, không cần commit lại ở đây
+      // Chỉ cập nhật status nếu cần
+      if (booking.voucherUsageStatus === 'applied') {
+        voucherStatus = 'applied';
+      }
+
       await booking.save();
+    } else {
+      // ⚠️ THANH TOÁN THẤT BẠI - ROLLBACK VOUCHER
+      // Nếu voucher đã được commit (status = 'applied'), cần rollback
+      if (
+        booking.voucherId &&
+        booking.voucherUsageStatus === 'applied' &&
+        booking.voucherUsageId &&
+        booking.customerId
+      ) {
+        try {
+          await rollbackVoucherUsage(
+            booking.voucherId,
+            booking.customerId,
+            booking._id
+          );
+          booking.voucherUsageStatus = 'restored';
+          booking.voucherRestoredAt = new Date();
+          await booking.save();
+          console.log(
+            `✅ Đã rollback voucher cho booking ${booking.code} do thanh toán thất bại`
+          );
+        } catch (error) {
+          console.error('❌ Lỗi khi rollback voucher:', error.message);
+        }
+      }
     }
 
     // Bắn socket cho FE cập nhật lịch sân
@@ -211,10 +289,20 @@ export const vnpayReturn = async (req, res, next) => {
       date: booking.date.toISOString().slice(0, 10),
     });
 
-    const query = new URLSearchParams({
+    const queryParams = {
       ...req.query,
       status: rspCode,
-    }).toString();
+    };
+
+    // Nếu voucher đã hết lượt trong quá trình thanh toán, gửi thêm trạng thái & thông báo chi tiết
+    if (voucherStatus === 'expired') {
+      queryParams.voucherStatus = 'expired';
+      queryParams.voucherMessage =
+        voucherErrorMessage ||
+        'Voucher bạn chọn đã hết lượt sử dụng trong lúc thanh toán. Hệ thống đã tính lại tổng tiền không áp dụng voucher.';
+    }
+
+    const query = new URLSearchParams(queryParams).toString();
 
     return res.redirect(`${FRONT_END_URL}/payment-return?${query}`);
   } catch (err) {

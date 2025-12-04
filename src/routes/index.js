@@ -8,7 +8,8 @@ import routesEquipment from "../modules/equipments/equipment.routes.js";
 import routesBookingItem from "../modules/bookingItems/bookingItem.routes.js";
 import userRouter from "../modules/users/user.routes.js";
 import uploadRoutes from "../common/routes/upload.routes.js";
-import emailRoutes from "../modules/email/email.routes.js";
+import voucherRoutes from "../modules/vouchers/voucher.routes.js";
+
 import routesReport from "../modules/reports/report.routes.js";
 
 const routes = Router();
@@ -21,9 +22,8 @@ routes.use("/payment", routerPayment);
 routes.use("/equipments", routesEquipment);
 routes.use("/booking-items", routesBookingItem);
 routes.use("/users", userRouter);
-// upload ảnh đăng ký user,bill chuyển tiền
 routes.use("/upload", uploadRoutes);
-routes.use("/email", emailRoutes);
+routes.use("/vouchers", voucherRoutes);
 routes.use("/reports", routesReport);
 
 export default routes;
