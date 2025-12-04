@@ -9,6 +9,9 @@ import { getBookingStatsService } from "./report.service.js";
 export const bookingStats = handleAsync(async(req, res) => {
     const result = await getBookingStatsService();
     return res.json(
-        createResponse(true, 200, "Lấy thống kê booking thành công!", result)
+        createResponse(true, 200, "Lấy thống kê booking thành công!", {
+            ...result,
+            totalRevenue: result.totalRevenue // ✅ expose lên FE
+        })
     );
 });
