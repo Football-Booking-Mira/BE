@@ -359,7 +359,14 @@ export const validateVoucher = handleAsync(async (req, res, next) => {
     return next(createError(401, "Vui lòng đăng nhập để sử dụng voucher!"));
   }
 
-  const { code, orderTotal, courtId, bookingDate, startTime } = req.body;
+  const {
+    code,
+    orderTotal,
+    courtId,
+    bookingDate,
+    startTime,
+    expectedDiscountValue,
+  } = req.body;
 
   const court = await Court.findById(courtId).select("type").lean();
   if (!court) {
@@ -375,6 +382,7 @@ export const validateVoucher = handleAsync(async (req, res, next) => {
       courtType: court.type,
       bookingDate,
       startTime,
+      expectedDiscountValue,
     });
 
   return res.json(

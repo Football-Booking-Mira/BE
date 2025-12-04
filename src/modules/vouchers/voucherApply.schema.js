@@ -27,6 +27,11 @@ export const voucherApplySchema = z.object({
         .string()
         .regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Giờ bắt đầu không hợp lệ!')
         .optional(),
+    // Giá trị giảm mà FE đã hiển thị cho khách tại thời điểm chọn voucher.
+    // Dùng để phát hiện trường hợp admin đã chỉnh sửa voucher sau đó.
+    expectedDiscountValue: z
+        .number({ invalid_type_error: 'Giá trị giảm (client) phải là số!' })
+        .optional(),
 });
 
 export default voucherApplySchema;

@@ -104,6 +104,7 @@ export const validateVoucherForOrder = async ({
   courtType,
   bookingDate,
   startTime,
+  expectedDiscountValue,
 }) => {
   const normalizedCode = normalizeVoucherCode(code);
   ensureUser(userId);
@@ -120,6 +121,18 @@ export const validateVoucherForOrder = async ({
 
   if (!voucher) {
     throw createError(404, "Voucher không tồn tại hoặc đã bị vô hiệu!");
+  }
+
+  // Nếu FE gửi kèm giá trị giảm mà khách đã thấy trước đó,
+  // kiểm tra xem admin có chỉnh sửa voucher sau đó hay không.
+  if (
+    typeof expectedDiscountValue === "number" &&
+    expectedDiscountValue !== voucher.discountValue
+  ) {
+    throw createError(
+      400,
+      "Voucher đã được cập nhật, vui lòng chọn lại voucher khác!"
+    );
   }
 
   if (voucher.remainingQuantity <= 0) {
