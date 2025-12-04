@@ -128,10 +128,23 @@ export const validateVoucherForOrder = async ({
 
   const now = new Date();
   const compareDate = bookingDate ? new Date(bookingDate) : now;
-  if (compareDate < voucher.startDate) {
+
+  // So sánh theo NGÀY (bỏ qua giờ) để tránh case:
+  // bookingDate = 2025-12-04T00:00:00.000Z
+  // voucher.startDate = 2025-12-04T14:04:00.000Z
+  // -> vẫn được tính là cùng một ngày và cho phép sử dụng
+  const normalizedCompare = new Date(compareDate);
+  const normalizedStart = new Date(voucher.startDate);
+  const normalizedEnd = new Date(voucher.endDate);
+
+  normalizedCompare.setHours(0, 0, 0, 0);
+  normalizedStart.setHours(0, 0, 0, 0);
+  normalizedEnd.setHours(0, 0, 0, 0);
+
+  if (normalizedCompare < normalizedStart) {
     throw createError(400, "Voucher chưa đến thời gian sử dụng!");
   }
-  if (compareDate > voucher.endDate) {
+  if (normalizedCompare > normalizedEnd) {
     throw createError(400, "Voucher đã hết hạn!");
   }
 
