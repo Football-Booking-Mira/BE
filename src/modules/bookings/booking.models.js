@@ -227,7 +227,7 @@ const BookingSchema = new Schema(
 
         cancelBy: {
             type: String,
-            enum: [USER_ROLES.ADMIN, USER_ROLES.USER],
+            enum: [USER_ROLES.USER, USER_ROLES.ADMIN, 'system', null],
             default: null, // 'admin' | 'user'  ai hủy
         },
 

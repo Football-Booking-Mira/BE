@@ -46,6 +46,23 @@ export const createVnpayPayment = async (req, res, next) => {
 
         //*Không cho thanh toán đơn đã tự hủy do quá hạn */
         const now = new Date();
+        // if (
+        //     booking.autoCancelAt &&
+        //     booking.autoCancelAt <= now &&
+        //     booking.status === BOOKING_STATUS.PENDING &&
+        //     booking.paymentStatus === PAYMENT_STATUS.UNPAID
+        // ) {
+        //     booking.status = BOOKING_STATUS.CANCELLED;
+        //     booking.cancelBy = 'system';
+        //     booking.cancelReason = 'Hết thời gian thanh toán online (5 phút), đơn tự động hủy.';
+        //     booking.cancelledAt = now;
+        //     await booking.save();
+
+        //     return res.status(400).json({
+        //         success: false,
+        //         message: 'Đơn đã hết hạn thanh toán (quá 5 phút). Vui lòng đặt sân lại.',
+        //     });
+        // }
         if (
             booking.autoCancelAt &&
             booking.autoCancelAt <= now &&
@@ -56,13 +73,25 @@ export const createVnpayPayment = async (req, res, next) => {
             booking.cancelBy = 'system';
             booking.cancelReason = 'Hết thời gian thanh toán online (5 phút), đơn tự động hủy.';
             booking.cancelledAt = now;
-            await booking.save();
+
+            try {
+                await booking.save();
+            } catch (err) {
+                if (err.name === 'ValidationError') {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Không thể cập nhật trạng thái đơn đặt sân. Dữ liệu không hợp lệ!',
+                    });
+                }
+                return next(err);
+            }
 
             return res.status(400).json({
                 success: false,
                 message: 'Đơn đã hết hạn thanh toán (quá 5 phút). Vui lòng đặt sân lại.',
             });
         }
+
         // Không cho thanh toán đơn đã hủy
         if (booking.status === BOOKING_STATUS.CANCELLED) {
             return res
