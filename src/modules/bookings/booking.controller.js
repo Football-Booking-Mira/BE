@@ -25,6 +25,51 @@ const toMinutes = (t) => {
 
 const overlap = (a1, a2, b1, b2) => Math.max(0, Math.min(a2, b2) - Math.max(a1, b1));
 
+// Chuyển 1 danh sách slot thành list khoảng thời gian (đơn vị: phút)
+const buildIntervalsFromSlots = (slots = [], fallbackStart, fallbackEnd) => {
+    if (Array.isArray(slots) && slots.length > 0) {
+        return slots.map((s) => ({
+            start: toMinutes(s.startTime),
+            end: toMinutes(s.endTime),
+        }));
+    }
+    return [
+        {
+            start: toMinutes(fallbackStart),
+            end: toMinutes(fallbackEnd),
+        },
+    ];
+};
+
+// Kiểm tra 1 list slot cần đặt có đụng bất kỳ booking nào không
+const hasAnyOverlapWithBookings = (
+    requestSlots, // [{ startTime, endTime }]
+    existingBookings, // list Booking query trong DB
+    ignoreBookingId = null
+) => {
+    const reqIntervals = buildIntervalsFromSlots(
+        requestSlots,
+        requestSlots[0]?.startTime,
+        requestSlots[0]?.endTime
+    );
+
+    for (const b of existingBookings) {
+        if (ignoreBookingId && String(b._id) === String(ignoreBookingId)) continue;
+
+        const bookingIntervals = buildIntervalsFromSlots(b.slots, b.startTime, b.endTime);
+
+        for (const r of reqIntervals) {
+            for (const i of bookingIntervals) {
+                if (overlap(r.start, r.end, i.start, i.end) > 0) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+};
+
 //* Cấu hình ca giờ
 const START_HOUR = 6; // 06:00
 const END_HOUR = 22; // 22:00
@@ -137,26 +182,28 @@ const calcFieldPriceBySlots = (startTime, endTime, court) => {
  */
 const calcFieldPriceFromSlotsList = (rawSlots = [], court) => {
     if (!Array.isArray(rawSlots) || rawSlots.length === 0) {
-        return { slotCount: 0, fieldAmount: 0, totalHours: 0 };
+        return { slotCount: 0, fieldAmount: 0, totalHours: 0, normalHours: 0, peakHours: 0 };
     }
 
     let fieldAmount = 0;
     let totalHours = 0;
     let slotCount = 0;
+    let normalHours = 0;
+    let peakHours = 0;
 
     for (const s of rawSlots) {
         if (!s || !s.startTime || !s.endTime) {
             throw createError(400, 'Slot không hợp lệ (thiếu startTime / endTime)!');
         }
 
-        // dùng lại logic sẵn có, nhưng theo từng ca 60'
         const {
             slotCount: c,
             fieldAmount: fa,
             totalHours: th,
+            normalHours: nh,
+            peakHours: ph,
         } = calcFieldPriceBySlots(s.startTime, s.endTime, court);
 
-        // mỗi slot FE gửi lên phải map đúng 1 ca 60'
         if (c !== 1) {
             throw createError(
                 400,
@@ -167,19 +214,55 @@ const calcFieldPriceFromSlotsList = (rawSlots = [], court) => {
         fieldAmount += fa;
         totalHours += th;
         slotCount += c;
+        normalHours += nh;
+        peakHours += ph;
     }
 
-    return { slotCount, fieldAmount, totalHours };
+    return { slotCount, fieldAmount, totalHours, normalHours, peakHours };
 };
 
-//* Tính tiền theo ca
+//* Tính tiền theo ca (support GET query và POST body)
 export const calculateBookingPrice = handleAsync(async (req, res, next) => {
-    const { courtId, startTime, endTime } = req.query;
-    if (!courtId || !startTime || !endTime)
+    // Ưu tiên courtId từ body, fallback query
+    const courtId = req.body.courtId || req.query.courtId;
+    const slots = req.body.slots;
+
+    const startTime = req.body.startTime || req.query.startTime;
+    const endTime = req.body.endTime || req.query.endTime;
+
+    if (!courtId) {
         return next(createError(400, 'Thiếu dữ liệu để tính tiền!'));
+    }
 
     const court = await Court.findById(courtId);
     if (!court) return next(createError(404, 'Không tìm thấy sân!'));
+
+    //  Nếu FE gửi danh sách slots[] -> tính đúng theo từng ca
+    if (Array.isArray(slots) && slots.length > 0) {
+        const { slotCount, fieldAmount, totalHours, normalHours, peakHours } =
+            calcFieldPriceFromSlotsList(slots, court);
+
+        if (slotCount === 0) {
+            return next(createError(400, 'Danh sách ca không hợp lệ!'));
+        }
+
+        return res.status(200).json(
+            createResponse(true, 200, 'Tính tiền thành công!', {
+                fieldAmount,
+                equipmentTotal: 0,
+                discountTotal: 0,
+                total: fieldAmount,
+                normalHours,
+                peakHours,
+                totalHours,
+            })
+        );
+    }
+
+    //  startTime - endTime liên tục
+    if (!startTime || !endTime) {
+        return next(createError(400, 'Thiếu dữ liệu để tính tiền!'));
+    }
 
     const { slotCount, fieldAmount, normalHours, peakHours, totalHours } = calcFieldPriceBySlots(
         startTime,
@@ -378,15 +461,17 @@ export const createBooking = handleAsync(async (req, res, next) => {
     const nextDay = new Date(day);
     nextDay.setDate(day.getDate() + 1);
 
-    const hasOverlap = await Booking.findOne({
+    // Lấy tất cả booking cùng sân + ngày (trừ CANCELLED)
+    const bookingsSameDay = await Booking.find({
         courtId,
         date: { $gte: day, $lt: nextDay },
         status: { $ne: BOOKING_STATUS.CANCELLED },
-        startTime: { $lt: endTime },
-        endTime: { $gt: startTime },
     });
 
-    if (hasOverlap) {
+    // Slot cần check: nếu FE gửi slots[] thì dùng slots, nếu không thì 1 block startTime–endTime
+    const requestSlots = hasSlotList && slots.length > 0 ? slots : [{ startTime, endTime }];
+
+    if (hasAnyOverlapWithBookings(requestSlots, bookingsSameDay)) {
         return next(createError(400, 'Khung giờ này đã có người đặt!'));
     }
 
@@ -649,6 +734,12 @@ export const createMultiBooking = handleAsync(async (req, res, next) => {
     day.setHours(0, 0, 0, 0);
     const nextDay = new Date(day);
     nextDay.setDate(day.getDate() + 1);
+    // tất cả booking còn hiệu lực trong ngày để check trùng cho từng slot
+    const bookingsSameDay = await Booking.find({
+        courtId,
+        date: { $gte: day, $lt: nextDay },
+        status: { $ne: BOOKING_STATUS.CANCELLED },
+    });
 
     for (const slot of timeSlots) {
         const { startTime, endTime } = slot || {};
@@ -672,13 +763,25 @@ export const createMultiBooking = handleAsync(async (req, res, next) => {
             );
         }
 
-        // Kiểm tra trùng giờ cho slot hiện tại
-        const hasOverlap = await Booking.findOne({
-            courtId,
-            date: { $gte: day, $lt: nextDay },
-            status: { $ne: BOOKING_STATUS.CANCELLED },
-            startTime: { $lt: endTime },
-            endTime: { $gt: startTime },
+        // Kiểm tra trùng giờ cho slot hiện tại (theo từng ca)
+        const requestSlots = [{ startTime, endTime }];
+
+        if (hasAnyOverlapWithBookings(requestSlots, bookingsSameDay)) {
+            return next(
+                createError(
+                    400,
+                    `Khung giờ ${startTime} - ${endTime} đã có người đặt trên sân này!`
+                )
+            );
+        }
+
+        // nếu muốn tránh 2 slot trong cùng 1 request tự đè nhau thì
+        // có thể push tạm vào bookingsSameDay:
+        bookingsSameDay.push({
+            _id: 'temp_' + startTime + '_' + endTime,
+            startTime,
+            endTime,
+            slots: [{ startTime, endTime }],
         });
 
         if (hasOverlap) {
@@ -982,10 +1085,10 @@ export const updateBookingTime = handleAsync(async (req, res, next) => {
         return next(createError(403, 'Chỉ admin mới được chỉnh sửa đặt sân!'));
     }
 
-    const { courtId, date, startTime, endTime } = req.body;
+    const { courtId, date, startTime, endTime, slots } = req.body;
 
-    if (!courtId || !date || !startTime || !endTime) {
-        return next(createError(400, 'Thiếu sân, ngày hoặc giờ bắt đầu / kết thúc!'));
+    if (!courtId || !date) {
+        return next(createError(400, 'Thiếu sân hoặc ngày!'));
     }
 
     const court = await Court.findById(courtId);
@@ -996,29 +1099,61 @@ export const updateBookingTime = handleAsync(async (req, res, next) => {
         return next(createError(400, 'Ngày đặt không hợp lệ!'));
     }
 
-    //*  Tính giờ  & Tiền theo ca
-    const { slotCount, fieldAmount, totalHours } = calcFieldPriceBySlots(startTime, endTime, court);
+    // Chuẩn hóa slots / startTime-endTime
+    let usedSlots =
+        Array.isArray(slots) && slots.length > 0
+            ? slots.filter((s) => s && s.startTime && s.endTime)
+            : [];
+
+    let finalStartTime = startTime;
+    let finalEndTime = endTime;
+
+    if (usedSlots.length > 0) {
+        // sắp xếp để lấy min/max
+        usedSlots.sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime));
+        finalStartTime = usedSlots[0].startTime;
+        finalEndTime = usedSlots[usedSlots.length - 1].endTime;
+    }
+
+    if (!finalStartTime || !finalEndTime) {
+        return next(createError(400, 'Thiếu giờ bắt đầu / kết thúc!'));
+    }
+
+    // ---- Tính tiền ----
+    let slotCount, fieldAmount, totalHours;
+
+    if (usedSlots.length > 0) {
+        ({ slotCount, fieldAmount, totalHours } = calcFieldPriceFromSlotsList(usedSlots, court));
+    } else {
+        ({ slotCount, fieldAmount, totalHours } = calcFieldPriceBySlots(
+            finalStartTime,
+            finalEndTime,
+            court
+        ));
+    }
 
     if (slotCount === 0) {
         return next(createError(400, 'Khung giờ không hợp lệ hoặc nằm ngoài giờ hoạt động!'));
     }
 
-    //* check trùng giờ (không tính đơn hiện tại)
+    // Check trùng giờ
     const day = new Date(newDate);
     day.setHours(0, 0, 0, 0);
     const nextDay = new Date(day);
     nextDay.setDate(day.getDate() + 1);
 
-    const hasOverlap = await Booking.findOne({
-        _id: { $ne: booking._id },
+    // lấy tất cả booking cùng sân + ngày
+    const bookingsSameDay = await Booking.find({
         courtId,
         date: { $gte: day, $lt: nextDay },
         status: { $ne: BOOKING_STATUS.CANCELLED },
-        startTime: { $lt: endTime },
-        endTime: { $gt: startTime },
     });
 
-    if (hasOverlap) {
+    // slot mới của booking này
+    const requestSlots =
+        usedSlots.length > 0 ? usedSlots : [{ startTime: finalStartTime, endTime: finalEndTime }];
+
+    if (hasAnyOverlapWithBookings(requestSlots, bookingsSameDay, booking._id)) {
         return next(createError(400, 'Khung giờ này đã có người đặt!'));
     }
 
@@ -1027,31 +1162,29 @@ export const updateBookingTime = handleAsync(async (req, res, next) => {
 
     booking.courtId = courtId;
     booking.date = newDate;
-    booking.startTime = startTime;
-    booking.endTime = endTime;
+    booking.startTime = finalStartTime;
+    booking.endTime = finalEndTime;
     booking.hours = totalHours;
     booking.fieldAmount = fieldAmount;
     booking.equipmentTotal = booking.equipmentTotal || 0;
     booking.discountTotal = booking.discountTotal || 0;
-    booking.total = fieldAmount + (booking.equipmentTotal || 0) - (booking.discountTotal || 0);
+    booking.total = fieldAmount + booking.equipmentTotal - booking.discountTotal;
     booking.updatedAt = new Date();
+    booking.slots = usedSlots.length > 0 ? usedSlots : undefined;
 
     await booking.save();
 
     const io = req.app.get('io');
-    //* cập nhật danh sách admin
     io?.emit('booking_global_updated');
 
     const newDateStr = newDate.toISOString().slice(0, 10);
     const oldDateStr = oldDate.toISOString().slice(0, 10);
 
-    //* cập nhật sân + ngày mới cho client
     io?.to(String(courtId)).emit('booking_updated', {
         courtId: String(courtId),
         date: newDateStr,
     });
 
-    //* nếu đổi sân hoặc đổi ngày thì bắn event cho sân hoặc ngày cũ để client reload lại
     if (String(oldCourtId) !== String(courtId) || oldDateStr !== newDateStr) {
         io?.to(String(oldCourtId)).emit('booking_updated', {
             courtId: String(oldCourtId),
