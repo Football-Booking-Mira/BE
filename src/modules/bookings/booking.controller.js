@@ -392,27 +392,26 @@ export const createBooking = handleAsync(async (req, res, next) => {
 
     let voucherPayload = null;
     if (voucherCode) {
-        if (isMultiSlots) {
-            return next(
-                createError(
-                    400,
-                    'Voucher chỉ áp dụng khi đặt 1 ca. Vui lòng đặt từng ca riêng lẻ nếu muốn dùng voucher!'
-                )
-            );
-        }
+        // Không giới hạn 1 ca nữa, voucher áp dụng trên tổng tiền fieldAmount
 
         if (!finalCustomerId) {
             return next(createError(400, 'Vui lòng chọn khách hàng để áp dụng voucher!'));
         }
 
+        // Nếu đặt nhiều ca (slots[]), ưu tiên dùng giờ bắt đầu của ca đầu tiên
+        const voucherStartTime =
+            Array.isArray(slots) && slots.length > 0 && slots[0].startTime
+                ? slots[0].startTime
+                : startTime;
+
         voucherPayload = await validateVoucherForOrder({
             code: voucherCode,
             userId: finalCustomerId,
-            orderTotal: fieldAmount,
+            orderTotal: fieldAmount, // tổng tiền nhiều ca
             courtId,
             courtType: court.type,
             bookingDate: date,
-            startTime,
+            startTime: voucherStartTime,
         });
     }
 
@@ -471,7 +470,7 @@ export const createBooking = handleAsync(async (req, res, next) => {
         voucherUsageStatus: voucherPayload ? 'pending' : 'none',
     });
 
-    // ⭐ COMMIT VOUCHER NGAY nếu đơn offline đã thanh toán đủ (PAID)
+    // COMMIT VOUCHER NGAY nếu đơn offline đã thanh toán đủ (PAID)
     // Với online booking, voucher sẽ được commit ở createVnpayPayment (khi bấm "Hoàn tất thanh toán")
     if (voucherPayload && initialPaymentStatus === PAYMENT_STATUS.PAID) {
         try {
