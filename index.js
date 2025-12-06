@@ -49,26 +49,6 @@ app.set('io', io);
 // Khởi động job tự hủy đơn quá hạn thanh toán
 startAutoCancelJob(app);
 
-//  SOCKET EVENTS
-io.on('connection', (socket) => {
-    console.log(`⚡ Client connected: ${socket.id}`);
-
-    // Client join room sân riêng (nếu cần)
-    socket.on('join:court', (courtId) => {
-        socket.join(String(courtId));
-        console.log(` ${socket.id} joined room: ${courtId}`);
-    });
-
-    socket.on('leave:court', (courtId) => {
-        socket.leave(String(courtId));
-        console.log(` ${socket.id} left room: ${courtId}`);
-    });
-
-    socket.on('disconnect', (reason) => {
-        console.log(` Client disconnected: ${socket.id} (${reason})`);
-    });
-});
-
 //  Lắng nghe server
 httpServer.listen(PORT, () => {
     console.log(` API + Socket.IO running at http://${HOST}:${PORT}`);
