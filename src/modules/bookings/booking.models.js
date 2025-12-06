@@ -47,6 +47,12 @@ const BookingSchema = new Schema(
             type: String,
             required: true, // "HH:mm"
         },
+        slots: [
+            {
+                startTime: { type: String, required: true },
+                endTime: { type: String, required: true },
+            },
+        ],
 
         hours: {
             type: Number,
@@ -188,7 +194,7 @@ const BookingSchema = new Schema(
         depositMethod: {
             type: String,
             enum: Object.values(PAYMENT_METHOD), // phương thức cọc (vnpay, cash,..)
-            default: null
+            default: null,
         },
 
         //  Mốc thời gian thực tế
