@@ -3,9 +3,8 @@ import InvoiceItemModel from './invoice-item.models.js';
 import Booking from '../bookings/booking.models.js';
 import BookingItem from '../bookingItems/bookingItem.models.js';
 
-// ------------------------------
 // TẠO HÓA ĐƠN
-// ------------------------------
+
 export const createInvoice = async (req, res) => {
     try {
         const { bookingId, discount = 0, method, note } = req.body;
@@ -19,7 +18,7 @@ export const createInvoice = async (req, res) => {
                 .json({ success: false, message: 'Thiếu phương thức thanh toán' });
         }
 
-        // 1. Lấy booking
+        //  Lấy booking
         const booking = await Booking.findById(bookingId)
             .populate('customerId', 'name username phone email')
             .populate('courtId', 'name');
@@ -34,13 +33,6 @@ export const createInvoice = async (req, res) => {
                 .json({ success: false, message: 'Đơn đã hủy không thể thanh toán' });
         }
 
-        // console.log('DEBUG INVOICE_BOOKING:', {
-        //     code: booking.code,
-        //     total: booking.total,
-        //     depositAmount: booking.depositAmount,
-        //     depositStatus: booking.depositStatus,
-        // });
-
         const discountVal = Math.max(0, Number(discount) || 0);
 
         // Tổng tiền booking (sân + thiết bị - giảm giá trên booking nếu có)
@@ -54,6 +46,13 @@ export const createInvoice = async (req, res) => {
 
         // Số tiền cuối cùng cần thu trên hóa đơn
         const totalToPay = Math.max(0, remainingBeforeDiscount - discountVal);
+        // Nếu không còn tiền phải thu thì không cho tạo hóa đơn nữa
+        if (totalToPay <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Đơn này không còn số tiền phải thu thêm',
+            });
+        }
 
         //  Tạo mã hóa đơn
         const code = InvoiceModel.generateCode();
@@ -71,9 +70,9 @@ export const createInvoice = async (req, res) => {
             paidAt: new Date(),
         });
 
-        // 4. Tạo các dòng chi tiết
+        //  Tạo các dòng chi tiết
         const items = [];
-        // ===== TIỀN SÂN =====
+        //  TIỀN SÂN
         if (booking.fieldAmount && booking.fieldAmount > 0) {
             // số giờ đã lưu trong booking (createBooking đã set hours = số ca)
             const hours = booking.hours && booking.hours > 0 ? booking.hours : 1;
@@ -92,7 +91,7 @@ export const createInvoice = async (req, res) => {
             });
         }
 
-        // ===== THIẾT BỊ (mỗi thiết bị 1 dòng, đúng đơn vị cái/đôi/quả/…) =====
+        //  THIẾT BỊ (mỗi thiết bị 1 dòng, đúng đơn vị cái/đôi/quả/…)
         const bookingItems = await BookingItem.find({ bookingId: booking._id })
             .populate('equipmentId', 'name unit mode')
             .lean();
@@ -119,9 +118,19 @@ export const createInvoice = async (req, res) => {
             await InvoiceItemModel.insertMany(items);
         }
 
-        // Cập nhật booking -> đã thanh toán đủ
+        // Cập nhật booking -> đã thanh toán thêm phần còn lại
+        const currentDeposit = Number(booking.depositAmount || 0);
+        const newDepositAmount = currentDeposit + totalToPay;
+
         booking.paymentStatus = 'paid';
         booking.paymentMethod = method;
+        booking.depositAmount = newDepositAmount;
+
+        // nếu đã thu đủ (online + tại sân) thì đánh dấu depositStatus = 'paid'
+        if (newDepositAmount >= grossTotal) {
+            booking.depositStatus = 'paid';
+        }
+
         await booking.save();
 
         //  BẮN SOCKET cho admin + client để reload danh sách
@@ -144,9 +153,8 @@ export const createInvoice = async (req, res) => {
     }
 };
 
-// ------------------------------
 // LẤY HÓA ĐƠN THEO BOOKING
-// ------------------------------
+
 export const getInvoiceByBooking = async (req, res) => {
     try {
         const { bookingId } = req.params;
@@ -161,7 +169,11 @@ export const getInvoiceByBooking = async (req, res) => {
                 populate: [
                     { path: 'customerId', model: 'User' },
                     { path: 'courtId', model: 'Court' },
-                    { path: 'voucherId', model: 'Voucher', select: 'code discountType discountValue maxDiscountValue' },
+                    {
+                        path: 'voucherId',
+                        model: 'Voucher',
+                        select: 'code discountType discountValue maxDiscountValue',
+                    },
                 ],
             })
             .populate('customerId');
@@ -201,9 +213,8 @@ export const getInvoices = async (req, res) => {
     }
 };
 
-// ------------------------------
 // LẤY CHI TIẾT HÓA ĐƠN
-// ------------------------------
+
 export const getInvoiceById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -225,9 +236,7 @@ export const getInvoiceById = async (req, res) => {
     }
 };
 
-// ------------------------------
 // CẬP NHẬT TRẠNG THÁI THANH TOÁN
-// ------------------------------
 export const updateInvoiceStatus = async (req, res) => {
     try {
         const { id } = req.params;
