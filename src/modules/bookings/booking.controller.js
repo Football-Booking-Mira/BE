@@ -99,6 +99,33 @@ const generateTimeSlots = () => {
 };
 
 const TIME_SLOTS = generateTimeSlots();
+// Gom slots thành các nhóm LIỀN NHAU.
+// Ví dụ: [18:30-19:30, 19:45-20:45, 21:00-22:00]
+//  1 nhóm nếu gap giữa các ca <= BREAK_DURATION (15')
+const groupSlotsByContinuous = (slots = []) => {
+    if (!Array.isArray(slots) || slots.length === 0) return [];
+
+    const sorted = [...slots].sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime));
+
+    const groups = [];
+    let current = [sorted[0]];
+
+    for (let i = 1; i < sorted.length; i++) {
+        const prev = sorted[i - 1];
+        const cur = sorted[i];
+        const gap = toMinutes(cur.startTime) - toMinutes(prev.endTime);
+
+        // gap <= 15p (BREAK_DURATION) thì coi là liền 1 block
+        if (gap <= BREAK_DURATION) {
+            current.push(cur);
+        } else {
+            groups.push(current);
+            current = [cur];
+        }
+    }
+    groups.push(current);
+    return groups;
+};
 
 /*
  * Tính tiền sân theo SỐ CA (không tính 15 phút nghỉ)
@@ -307,7 +334,9 @@ export const createBooking = handleAsync(async (req, res, next) => {
         totalFieldAmount,
     } = req.body;
 
-    if (!courtId || !date || !startTime || !endTime) {
+    const hasSlotList = Array.isArray(slots) && slots.length > 0;
+
+    if (!courtId || !date || (!startTime && !hasSlotList) || (!endTime && !hasSlotList)) {
         return next(createError(400, 'Thiếu dữ liệu bắt buộc!'));
     }
 
@@ -320,7 +349,8 @@ export const createBooking = handleAsync(async (req, res, next) => {
     //  Xác định đơn tạo tại quầy:
     const isOfflineMode =
         isOffline === true || isOffline === 'true' || roleFromToken === USER_ROLES.ADMIN;
-    //Đơn đặt ONLINE (user đặt trên web, thanh toán VNPAY / Momo)
+
+    // Đơn đặt ONLINE (user đặt trên web, thanh toán VNPAY / Momo)
     const isOnlineMode =
         !isOfflineMode && [PAYMENT_METHOD.VNPAY, PAYMENT_METHOD.MOMO].includes(paymentMethod);
 
@@ -338,62 +368,103 @@ export const createBooking = handleAsync(async (req, res, next) => {
         email: customerInfo?.email?.trim() || '',
     };
 
-    //  xem có phải đặt nhiều ca không
-    const hasSlotList = Array.isArray(slots) && slots.length > 0;
-    const isMultiSlots = Array.isArray(slots) && slots.length > 1;
-
-    let slotCount;
-    let fieldAmount;
-    let totalHours;
+    //  NHÓM SLOT
+    let slotGroups = [];
 
     if (hasSlotList) {
-        //  tính tiền đúng theo từng ca đã chọn
+        const cleanedSlots = slots.filter((s) => s && s.startTime && s.endTime);
+        if (cleanedSlots.length === 0) {
+            return next(createError(400, 'Danh sách ca không hợp lệ!'));
+        }
+        // group theo các block LIỀN NHAU (<= 15p nghỉ)
+        slotGroups = groupSlotsByContinuous(cleanedSlots);
+    } else {
+        // Không có slots[] thì coi như 1 block duy nhất startTime–endTime
+        if (!startTime || !endTime) {
+            return next(createError(400, 'Thiếu giờ bắt đầu / kết thúc!'));
+        }
+        slotGroups = [[{ startTime, endTime }]];
+    }
+
+    if (!Array.isArray(slotGroups) || slotGroups.length === 0) {
+        return next(createError(400, 'Không tìm thấy khung giờ hợp lệ để đặt sân!'));
+    }
+
+    //  TÍNH GIÁ THEO TỪNG NHÓM
+    const groupSummaries = []; // mỗi phần tử: { startTime, endTime, slotCount, fieldAmount, totalHours, slots? }
+
+    for (const group of slotGroups) {
+        const gStart = group[0].startTime;
+        const gEnd = group[group.length - 1].endTime;
+
+        let calcResult;
+        if (hasSlotList) {
+            // FE gửi list slot, server tính theo từng ca trong group
+            calcResult = calcFieldPriceFromSlotsList(group, court);
+        } else {
+            // 1 block liên tục
+            calcResult = calcFieldPriceBySlots(gStart, gEnd, court);
+        }
+
+        const { slotCount, fieldAmount, totalHours } = calcResult;
+
+        if (slotCount === 0) {
+            return next(
+                createError(
+                    400,
+                    `Khung giờ ${gStart} - ${gEnd} không hợp lệ hoặc nằm ngoài giờ hoạt động!`
+                )
+            );
+        }
+
+        groupSummaries.push({
+            startTime: gStart,
+            endTime: gEnd,
+            slotCount,
+            fieldAmount,
+            totalHours,
+            slots: hasSlotList ? group : undefined,
+        });
+    }
+
+    // So sánh tổng tiền sân FE gửi (nếu có) với server (chỉ để log cảnh báo)
+    if (typeof totalFieldAmount !== 'undefined') {
         const clientFieldAmount = Number(totalFieldAmount);
-
-        const result = calcFieldPriceFromSlotsList(slots, court);
-
-        slotCount = result.slotCount;
-        fieldAmount = result.fieldAmount;
-        totalHours = result.totalHours;
-
-        // (không bắt buộc) log nếu FE gửi totalFieldAmount khác server tính
+        const serverFieldAmount = groupSummaries.reduce(
+            (sum, g) => sum + Number(g.fieldAmount || 0),
+            0
+        );
         if (
             typeof clientFieldAmount === 'number' &&
             clientFieldAmount > 0 &&
-            Math.abs(clientFieldAmount - fieldAmount) >= 1000
+            Math.abs(clientFieldAmount - serverFieldAmount) >= 1000
         ) {
             console.warn(
                 '[createBooking] totalFieldAmount FE:',
                 clientFieldAmount,
                 ' != server:',
-                fieldAmount
+                serverFieldAmount
             );
         }
-    } else {
-        // Flow cũ: đặt 1 block liên tục startTime → endTime
-        ({ slotCount, fieldAmount, totalHours } = calcFieldPriceBySlots(startTime, endTime, court));
     }
 
-    if (slotCount === 0) {
-        return next(createError(400, 'Khung giờ không hợp lệ hoặc nằm ngoài giờ hoạt động!'));
-    }
-    // Xử lý ngày và giờ đá
+    //  XỬ LÝ NGÀY / GIỜ ĐÁ & FUTURE MATCH
     const bookingDateObj = new Date(date);
     if (Number.isNaN(bookingDateObj.getTime())) {
         return next(createError(400, 'Ngày đặt không hợp lệ!'));
     }
-    // Ngàu 00:00 giờ bôking
+
     const bookingDay = new Date(
         bookingDateObj.getFullYear(),
         bookingDateObj.getMonth(),
         bookingDateObj.getDate()
     );
-    // thời gian hiện tại
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    // giờ bắt đầu trận đấu (ghép date + startTime)
-    const [sh, sm] = startTime.split(':').map(Number);
+    // dùng giờ bắt đầu của NHÓM ĐẦU TIÊN để xác định "đá sau" hay "đá ngay"
+    const firstStartTime = groupSummaries[0].startTime;
+    const [sh, sm] = firstStartTime.split(':').map(Number);
     const bookingStartDateTime = new Date(
         bookingDateObj.getFullYear(),
         bookingDateObj.getMonth(),
@@ -403,59 +474,13 @@ export const createBooking = handleAsync(async (req, res, next) => {
         0,
         0
     );
-    // Trận đá tương lai
-    //  - Khác ngày: bookingDay > today
-    //  - Hoặc cùng ngày nhưng giờ bắt đầu > bây giờ (VD: sáng đặt chiều đá)
+
     const isFutureMatch =
         bookingDay.getTime() > today.getTime() ||
         (bookingDay.getTime() === today.getTime() &&
             bookingStartDateTime.getTime() > now.getTime());
-    let initialPaymentStatus = PAYMENT_STATUS.UNPAID;
-    let depositAmount = 0;
-    let depositStatus = DEPOSIT_STATUS.PENDING;
-    let depositMethod = undefined;
 
-    // ĐƠN TẠI QUẦY (OFFLINE + CASH)
-    if (isOfflineMode && paymentMethod === PAYMENT_METHOD.CASH) {
-        if (isFutureMatch) {
-            // Khách đặt KHÁC NGÀY hoặc SÁNG ĐẶT CHIỀU ĐÁ:
-            //    => BẮT BUỘC phải cọc tối thiểu 50%
-            const paidFlag = paidAtCreation === true || paidAtCreation === 'true';
-
-            if (!paidFlag) {
-                return next(
-                    createError(
-                        400,
-                        'Khách đặt sân đá sau (khác ngày hoặc khác giờ) bắt buộc phải cọc tối thiểu 50% tiền sân!'
-                    )
-                );
-            }
-
-            // Tự set cọc 50%
-            depositAmount = Math.round(fieldAmount * 0.5);
-            depositStatus = DEPOSIT_STATUS.PAID;
-            depositMethod = PAYMENT_METHOD.CASH;
-
-            // Mới thanh toán 1 phần (cọc) => PARTIAL
-            initialPaymentStatus = PAYMENT_STATUS.PARTIAL;
-        } else {
-            //  Đặt và đá GẦN NHƯ NGAY LẬP TỨC (cùng ngày và giờ bắt đầu <= hiện tại)
-            const paidFlag = paidAtCreation === true || paidAtCreation === 'true';
-
-            if (paidFlag) {
-                // Thu đủ luôn
-                initialPaymentStatus = PAYMENT_STATUS.PAID;
-            } else {
-                // Chưa thu đồng nào
-                initialPaymentStatus = PAYMENT_STATUS.UNPAID;
-            }
-        }
-    } else {
-        //  Các trường hợp còn lại (ONLINE, chuyển khoản,...)
-        initialPaymentStatus = PAYMENT_STATUS.UNPAID;
-    }
-
-    // Check trùng giờ (không tính đơn đã hủy)
+    //  CHECK TRÙNG GIỜ VỚI CÁC BOOKING KHÁC
     const day = new Date(bookingDay);
     day.setHours(0, 0, 0, 0);
     const nextDay = new Date(day);
@@ -468,35 +493,35 @@ export const createBooking = handleAsync(async (req, res, next) => {
         status: { $ne: BOOKING_STATUS.CANCELLED },
     });
 
-    // Slot cần check: nếu FE gửi slots[] thì dùng slots, nếu không thì 1 block startTime–endTime
-    const requestSlots = hasSlotList && slots.length > 0 ? slots : [{ startTime, endTime }];
+    // Slot cần check: nếu FE gửi slots[] thì dùng full slots, nếu không thì 1 block startTime–endTime
+    const requestSlots =
+        hasSlotList && slots.length > 0
+            ? slots
+            : [{ startTime: groupSummaries[0].startTime, endTime: groupSummaries[0].endTime }];
 
     if (hasAnyOverlapWithBookings(requestSlots, bookingsSameDay)) {
         return next(createError(400, 'Khung giờ này đã có người đặt!'));
     }
 
+    //  VOUCHER (ÁP CHO NHÓM ĐẦU TIÊN)
     let voucherPayload = null;
     if (voucherCode) {
-        // Không giới hạn 1 ca nữa, voucher áp dụng trên tổng tiền fieldAmount
-
         if (!finalCustomerId) {
             return next(createError(400, 'Vui lòng chọn khách hàng để áp dụng voucher!'));
         }
 
-        // Nếu đặt nhiều ca (slots[]), ưu tiên dùng giờ bắt đầu của ca đầu tiên
-        const voucherStartTime =
-            Array.isArray(slots) && slots.length > 0 && slots[0].startTime
-                ? slots[0].startTime
-                : startTime;
+        const primaryGroup = groupSummaries[0];
+        const primarySlots = slotGroups[0];
 
         voucherPayload = await validateVoucherForOrder({
             code: voucherCode,
             userId: finalCustomerId,
-            orderTotal: fieldAmount, // tổng tiền nhiều ca
+            orderTotal: primaryGroup.fieldAmount,
             courtId,
             courtType: court.type,
             bookingDate: date,
-            startTime: voucherStartTime,
+            startTime: primaryGroup.startTime,
+            slots: hasSlotList ? primarySlots : undefined,
         });
     }
 
@@ -504,75 +529,133 @@ export const createBooking = handleAsync(async (req, res, next) => {
 
     const initialStatus = isOfflineMode ? BOOKING_STATUS.CONFIRMED : BOOKING_STATUS.PENDING;
 
-    //* tự hủy đơn sau 5 phú đơn không thanh toán lại
     let autoCancelAt = null;
-
     if (!isOfflineMode && paymentMethod === PAYMENT_METHOD.VNPAY) {
         const expireMinutes = 5; // tự hủy sau 5 phút
         autoCancelAt = new Date(Date.now() + expireMinutes * 60 * 1000);
     }
-    const booking = await Booking.create({
-        code: `BK${Date.now().toString().slice(-6)}`,
-        courtId,
-        customerId: finalCustomerId,
-        customerInfo: normalizedCustomerInfo,
-        date,
-        startTime,
-        endTime,
-        hours: totalHours,
-        fieldAmount,
-        equipmentTotal: 0,
-        discountTotal: voucherDiscount,
-        total: Math.max(0, fieldAmount - voucherDiscount),
-        paymentMethod,
-        notes: note || '',
-        status: initialStatus,
-        slots: hasSlotList ? slots : undefined,
-        paymentStatus: initialPaymentStatus,
-        createdBy, // 'admin' hoặc 'user'
-        autoCancelAt,
-        //Thoong tin cọc
-        depositAmount,
-        depositStatus,
-        depositMethod,
-        voucherId: voucherPayload?.voucher?._id || null,
-        voucherCode: voucherPayload?.normalizedCode || '',
-        voucherDiscount,
-        voucherSnapshot: voucherPayload
-            ? {
-                  discountType: voucherPayload.voucher.discountType,
-                  discountValue: voucherPayload.voucher.discountValue,
-                  maxDiscountValue: voucherPayload.voucher.maxDiscountValue,
-                  minOrderValue: voucherPayload.voucher.minOrderValue,
-                  perUserLimit: voucherPayload.voucher.perUserLimit,
-                  startDate: voucherPayload.voucher.startDate,
-                  endDate: voucherPayload.voucher.endDate,
-              }
-            : undefined,
-        // CHỈ lưu thông tin voucher, CHƯA commit voucher usage
-        // - Online booking: Voucher sẽ được commit ở createVnpayPayment (first-come-first-served)
-        // - Offline booking đã thanh toán đủ: Voucher sẽ được commit ngay ở đây
-        voucherUsageStatus: voucherPayload ? 'pending' : 'none',
-    });
 
-    // COMMIT VOUCHER NGAY nếu đơn offline đã thanh toán đủ (PAID)
-    // Với online booking, voucher sẽ được commit ở createVnpayPayment (khi bấm "Hoàn tất thanh toán")
-    if (voucherPayload && initialPaymentStatus === PAYMENT_STATUS.PAID) {
-        try {
-            const usage = await commitVoucherUsage({
-                voucherId: voucherPayload.voucher._id,
-                bookingId: booking._id,
-                userId: finalCustomerId,
-                discountAmount: voucherDiscount,
-                orderTotal: fieldAmount,
-            });
-            booking.voucherUsageId = usage._id;
-            booking.voucherUsageStatus = 'applied';
-            await booking.save();
-        } catch (error) {
-            await Booking.findByIdAndDelete(booking._id);
-            return next(error);
+    const createdBookings = [];
+
+    //  TẠO BOOKING CHO TỪNG NHÓM SLOT
+    for (let index = 0; index < groupSummaries.length; index++) {
+        const summary = groupSummaries[index];
+        const isVoucherBooking = index === 0 && !!voucherPayload;
+
+        // Tính trạng thái thanh toán & cọc cho từng booking
+        let initialPaymentStatus = PAYMENT_STATUS.UNPAID;
+        let depositAmount = 0;
+        let depositStatus = DEPOSIT_STATUS.PENDING;
+        let depositMethod = undefined;
+
+        // ĐƠN TẠI QUẦY (OFFLINE + CASH)
+        if (isOfflineMode && paymentMethod === PAYMENT_METHOD.CASH) {
+            if (isFutureMatch) {
+                // Khách đặt KHÁC NGÀY hoặc SÁNG ĐẶT CHIỀU ĐÁ:
+                //    BẮT BUỘC phải cọc tối thiểu 50%
+                const paidFlag = paidAtCreation === true || paidAtCreation === 'true';
+
+                if (!paidFlag) {
+                    return next(
+                        createError(
+                            400,
+                            'Khách đặt sân đá sau (khác ngày hoặc khác giờ) bắt buộc phải cọc tối thiểu 50% tiền sân!'
+                        )
+                    );
+                }
+
+                // Tự set cọc 50% CHO booking này
+                depositAmount = Math.round(summary.fieldAmount * 0.5);
+                depositStatus = DEPOSIT_STATUS.PAID;
+                depositMethod = PAYMENT_METHOD.CASH;
+
+                // Mới thanh toán 1 phần (cọc) => PARTIAL
+                initialPaymentStatus = PAYMENT_STATUS.PARTIAL;
+            } else {
+                //  Đặt và đá GẦN NHƯ NGAY LẬP TỨC (cùng ngày và giờ bắt đầu <= hiện tại)
+                const paidFlag = paidAtCreation === true || paidAtCreation === 'true';
+
+                if (paidFlag) {
+                    // Thu đủ luôn
+                    initialPaymentStatus = PAYMENT_STATUS.PAID;
+                } else {
+                    // Chưa thu đồng nào
+                    initialPaymentStatus = PAYMENT_STATUS.UNPAID;
+                }
+            }
+        } else {
+            //  Các trường hợp còn lại (ONLINE, chuyển khoản,...)
+            initialPaymentStatus = PAYMENT_STATUS.UNPAID;
         }
+
+        const discountForThisBooking = isVoucherBooking ? voucherDiscount : 0;
+        const totalForThisBooking = Math.max(0, summary.fieldAmount - discountForThisBooking);
+
+        const booking = await Booking.create({
+            code:
+                groupSummaries.length === 1
+                    ? `BK${Date.now().toString().slice(-6)}`
+                    : `BK${Date.now().toString().slice(-6)}${String(index + 1).padStart(2, '0')}`, // để phân biệt nhiều booking
+            courtId,
+            customerId: finalCustomerId,
+            customerInfo: normalizedCustomerInfo,
+            date,
+            startTime: summary.startTime,
+            endTime: summary.endTime,
+            hours: summary.totalHours,
+            fieldAmount: summary.fieldAmount,
+            equipmentTotal: 0,
+            discountTotal: discountForThisBooking,
+            total: totalForThisBooking,
+            paymentMethod,
+            notes: note || '',
+            status: initialStatus,
+            slots: summary.slots,
+            paymentStatus: initialPaymentStatus,
+            createdBy,
+            autoCancelAt,
+            //Thông tin cọc
+            depositAmount,
+            depositStatus,
+            depositMethod,
+            voucherId: isVoucherBooking ? voucherPayload?.voucher?._id || null : null,
+            voucherCode: isVoucherBooking ? voucherPayload?.normalizedCode || '' : '',
+            voucherDiscount: isVoucherBooking ? voucherDiscount : 0,
+            voucherSnapshot:
+                isVoucherBooking && voucherPayload
+                    ? {
+                          discountType: voucherPayload.voucher.discountType,
+                          discountValue: voucherPayload.voucher.discountValue,
+                          maxDiscountValue: voucherPayload.voucher.maxDiscountValue,
+                          minOrderValue: voucherPayload.voucher.minOrderValue,
+                          perUserLimit: voucherPayload.voucher.perUserLimit,
+                          startDate: voucherPayload.voucher.startDate,
+                          endDate: voucherPayload.voucher.endDate,
+                      }
+                    : undefined,
+            voucherUsageStatus: isVoucherBooking && voucherPayload ? 'pending' : 'none',
+        });
+
+        // COMMIT VOUCHER NGAY nếu đơn offline đã thanh toán đủ (PAID) – chỉ cho booking có voucher (nhóm đầu tiên)
+        if (isVoucherBooking && initialPaymentStatus === PAYMENT_STATUS.PAID) {
+            try {
+                const usage = await commitVoucherUsage({
+                    voucherId: voucherPayload.voucher._id,
+                    bookingId: booking._id,
+                    userId: finalCustomerId,
+                    discountAmount: voucherDiscount,
+                    orderTotal: summary.fieldAmount,
+                });
+                booking.voucherUsageId = usage._id;
+                booking.voucherUsageStatus = 'applied';
+                await booking.save();
+            } catch (error) {
+                await Booking.findByIdAndDelete(booking._id);
+                return next(error);
+            }
+        }
+
+        createdBookings.push(booking);
     }
 
     const io = req.app.get('io');
@@ -582,7 +665,18 @@ export const createBooking = handleAsync(async (req, res, next) => {
         date: new Date(date).toISOString().slice(0, 10),
     });
 
-    return res.status(201).json(createResponse(true, 201, 'Tạo đơn đặt sân thành công!', booking));
+    // Backward-compatible:
+    //  - 1 nhóm slot  -> trả về 1 booking (như cũ)
+    //  - nhiều nhóm   -> trả về mảng booking
+    if (createdBookings.length === 1) {
+        return res
+            .status(201)
+            .json(createResponse(true, 201, 'Tạo đơn đặt sân thành công!', createdBookings[0]));
+    }
+
+    return res
+        .status(201)
+        .json(createResponse(true, 201, 'Tạo nhiều đơn đặt sân thành công!', createdBookings));
 });
 
 //* Lấy slot theo sân
@@ -661,7 +755,7 @@ export const cancelBooking = handleAsync(async (req, res, next) => {
         booking.cancelNote = internalNote.trim();
     }
 
-    // ⭐ CHỈ restore voucher nếu đã commit (status = "applied")
+    //CHỈ restore voucher nếu đã commit (status = "applied")
     // Nếu voucher chưa commit (status = "pending"), không cần restore vì chưa bị trừ lượt
     if (
         booking.voucherUsageId &&
@@ -783,15 +877,6 @@ export const createMultiBooking = handleAsync(async (req, res, next) => {
             endTime,
             slots: [{ startTime, endTime }],
         });
-
-        if (hasOverlap) {
-            return next(
-                createError(
-                    400,
-                    `Khung giờ ${startTime} - ${endTime} đã có người đặt trên sân này!`
-                )
-            );
-        }
 
         // status ban đầu
         const initialStatus = isOfflineMode ? BOOKING_STATUS.CONFIRMED : BOOKING_STATUS.PENDING;
@@ -1119,7 +1204,7 @@ export const updateBookingTime = handleAsync(async (req, res, next) => {
         return next(createError(400, 'Thiếu giờ bắt đầu / kết thúc!'));
     }
 
-    // ---- Tính tiền ----
+    //  Tính tiền
     let slotCount, fieldAmount, totalHours;
 
     if (usedSlots.length > 0) {
@@ -1281,12 +1366,38 @@ export const updateRefundStatus = handleAsync(async (req, res, next) => {
         return next(createError(400, 'Trạng thái hoàn tiền không hợp lệ!'));
     }
 
+    const current = booking.refundStatus || 'pending';
+
+    // Flow hợp lệ:
+    //  - pending     -> pending, processing
+    //  - processing  -> processing, refunded, rejected
+    //  - refunded    -> chỉ refunded
+    //  - rejected    -> chỉ rejected
+    const FLOW = {
+        pending: ['pending', 'processing'],
+        processing: ['processing', 'refunded', 'rejected'],
+        refunded: ['refunded'],
+        rejected: ['rejected'],
+    };
+
+    const allowedNext = FLOW[current] || [];
+
+    if (!allowedNext.includes(status)) {
+        return next(
+            createError(
+                400,
+                `Không thể chuyển trực tiếp từ trạng thái "${current}" sang "${status}"!`
+            )
+        );
+    }
+
     booking.refundStatus = status;
 
     if (note && note.trim()) {
         booking.refundNote = note.trim();
     }
 
+    // chỉ khi dùng endpoint này để set refunded + markPaymentRefunded !== false
     if (status === 'refunded' && markPaymentRefunded !== false) {
         booking.paymentStatus = PAYMENT_STATUS.REFUNDED;
     }
@@ -1295,7 +1406,6 @@ export const updateRefundStatus = handleAsync(async (req, res, next) => {
 
     const io = req.app.get('io');
     io?.emit('booking_global_updated');
-    // cho user my-bookings
     io?.to(String(booking.courtId)).emit('booking_updated', {
         courtId: String(booking.courtId),
         date: booking.date.toISOString().slice(0, 10),
@@ -1439,8 +1549,9 @@ export const rejectRefundBooking = handleAsync(async (req, res, next) => {
     const booking = await Booking.findById(id);
     if (!booking) return next(createError(404, 'Không tìm thấy đơn đặt sân'));
 
-    if (!['pending', 'processing'].includes(booking.refundStatus)) {
-        return next(createError(400, 'Chỉ xử lý đơn đang yêu cầu hoàn tiền'));
+    // ❗ chỉ allow từ chối khi đang "Đang hoàn tiền"
+    if (booking.refundStatus !== 'processing') {
+        return next(createError(400, 'Chỉ xử lý đơn đang ở trạng thái "Đang hoàn tiền"!'));
     }
 
     booking.refundStatus = 'rejected';
@@ -1460,6 +1571,7 @@ export const rejectRefundBooking = handleAsync(async (req, res, next) => {
     return res.status(200).json(createResponse(true, 200, 'Đã từ chối yêu cầu hoàn tiền', booking));
 });
 
+//* đang hoàn tiền
 export const completeRefundBooking = handleAsync(async (req, res, next) => {
     const { id } = req.params;
     const { billImage } = req.body;
@@ -1467,8 +1579,11 @@ export const completeRefundBooking = handleAsync(async (req, res, next) => {
     const booking = await Booking.findById(id);
     if (!booking) return next(createError(404, 'Không tìm thấy đơn đặt sân'));
 
-    if (!['pending', 'processing'].includes(booking.refundStatus)) {
-        return next(createError(400, 'Chỉ xử lý đơn đang yêu cầu hoàn tiền'));
+    //Chỉ cho hoàn tiền xong khi đang ở trạng thái "Đang hoàn tiền"
+    if (booking.refundStatus !== 'processing') {
+        return next(
+            createError(400, 'Chỉ hoàn tiền xong cho đơn đang ở trạng thái "Đang hoàn tiền"!')
+        );
     }
 
     if (!billImage) {
@@ -1498,6 +1613,7 @@ export const completeRefundBooking = handleAsync(async (req, res, next) => {
         .status(200)
         .json(createResponse(true, 200, 'Đã cập nhật hoàn tiền thành công', booking));
 });
+
 // * Thuê thêm thiết bị khi đang sử dụng
 export const addEquipmentsBooking = handleAsync(async (req, res, next) => {
     const bookingId = req.params.id;
@@ -1698,7 +1814,7 @@ export const adminCancelCashBooking = handleAsync(async (req, res, next) => {
         }
     } else {
         // Đơn chưa thu đồng nào (UNPAID, deposit = 0)
-        // => Không có gì để hoàn, chỉ cần hủy
+        //  Không có gì để hoàn, chỉ cần hủy
         booking.refundStatus = booking.refundStatus || 'none';
         if (adminReason?.trim()) {
             booking.refundAdminReason = adminReason.trim();
