@@ -16,8 +16,7 @@ import {
 } from '../../common/config/environment.js';
 import { commitVoucherUsage, rollbackVoucherUsage } from '../vouchers/voucher.service.js';
 
-// Tỉ lệ cọc so với TIỀN SÂN
-// 1= thanh toán FULL tiền sân
+// Tỉ lệ cọc so với TIỀN SÂN — 1 = thanh toán FULL tiền sân
 const DEPOSIT_RATE = 1;
 
 function sortObject(obj) {
@@ -31,38 +30,38 @@ function sortObject(obj) {
     return sorted;
 }
 
-// Tạo URL thanh toán VNPAY (tiền sân)
+//  TẠO THANH TOÁN VNPAY
 export const createVnpayPayment = async (req, res, next) => {
     try {
-        const { bookingId, amount, isRetryPayment } = req.body;
-        if (!bookingId) {
-            return res.status(400).json({ success: false, message: 'Thiếu bookingId' });
+        const { bookingId, bookingIds, amount, isRetryPayment } = req.body;
+        //console.log(' VNPay body:', { bookingId, bookingIds, amount, isRetryPayment });
+
+        // Gom list id cần thanh toán
+        let ids = [];
+        if (Array.isArray(bookingIds) && bookingIds.length > 0) {
+            ids = bookingIds;
+        } else if (bookingId) {
+            ids = [bookingId];
+        } else {
+            return res
+                .status(400)
+                .json({ success: false, message: 'Thiếu bookingId hoặc bookingIds' });
         }
 
-        const booking = await Booking.findById(bookingId);
-        if (!booking) {
+        const bookings = await Booking.find({ _id: { $in: ids } });
+        // console.log(
+        //     ' Found bookings:',
+        //     bookings.map((b) => ({ id: b._id.toString(), code: b.code }))
+        // );
+
+        if (!bookings || bookings.length === 0) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy booking' });
         }
 
-        //*Không cho thanh toán đơn đã tự hủy do quá hạn */
-        const now = new Date();
-        // if (
-        //     booking.autoCancelAt &&
-        //     booking.autoCancelAt <= now &&
-        //     booking.status === BOOKING_STATUS.PENDING &&
-        //     booking.paymentStatus === PAYMENT_STATUS.UNPAID
-        // ) {
-        //     booking.status = BOOKING_STATUS.CANCELLED;
-        //     booking.cancelBy = 'system';
-        //     booking.cancelReason = 'Hết thời gian thanh toán online (5 phút), đơn tự động hủy.';
-        //     booking.cancelledAt = now;
-        //     await booking.save();
+        // booking “đại diện” để check autoCancel, code...
+        const booking = bookings[0];
 
-        //     return res.status(400).json({
-        //         success: false,
-        //         message: 'Đơn đã hết hạn thanh toán (quá 5 phút). Vui lòng đặt sân lại.',
-        //     });
-        // }
+        const now = new Date();
         if (
             booking.autoCancelAt &&
             booking.autoCancelAt <= now &&
@@ -92,23 +91,20 @@ export const createVnpayPayment = async (req, res, next) => {
             });
         }
 
-        // Không cho thanh toán đơn đã hủy
-        if (booking.status === BOOKING_STATUS.CANCELLED) {
-            return res
-                .status(400)
-                .json({ success: false, message: 'Đơn này đã bị hủy, không thể thanh toán!' });
-        }
-
-        // Tổng tiền cần thanh toán cho booking
-        const total = Number(booking.total || booking.fieldAmount || 0);
+        // Tổng tiền của TẤT CẢ booking
+        const total = bookings.reduce((sum, b) => sum + Number(b.total || b.fieldAmount || 0), 0);
         if (!total || total <= 0) {
             return res.status(400).json({ success: false, message: 'Tổng tiền không hợp lệ!' });
         }
 
-        const oldDeposit =
-            booking.depositStatus === DEPOSIT_STATUS.PAID ? Number(booking.depositAmount || 0) : 0;
-        const remaining = Math.max(0, total - oldDeposit);
+        // Tổng tiền đã cọc của cả nhóm
+        const oldDeposit = bookings.reduce(
+            (sum, b) =>
+                sum + (b.depositStatus === DEPOSIT_STATUS.PAID ? Number(b.depositAmount || 0) : 0),
+            0
+        );
 
+        const remaining = Math.max(0, total - oldDeposit);
         if (remaining <= 0) {
             return res
                 .status(400)
@@ -116,15 +112,11 @@ export const createVnpayPayment = async (req, res, next) => {
         }
 
         let payNow = 0;
-
         if (isRetryPayment) {
-            //  THANH TOÁN LẠI: chỉ cho trả phần còn thiếu
             const clientAmount = Number(amount || 0);
             payNow = clientAmount > 0 ? Math.min(clientAmount, remaining) : remaining;
         } else {
-            //  THANH TOÁN LẦN ĐẦU: tính theo tỉ lệ cọc (DEPOSIT_RATE)
-            let depositAmount = Math.round(total * DEPOSIT_RATE);
-            // không được vượt quá phần còn lại
+            let depositAmount = Math.round(total * DEPOSIT_RATE); // DEPOSIT_RATE = 1
             depositAmount = Math.min(depositAmount, remaining);
             payNow = depositAmount;
         }
@@ -135,27 +127,44 @@ export const createVnpayPayment = async (req, res, next) => {
                 .json({ success: false, message: 'Số tiền thanh toán không hợp lệ!' });
         }
 
-        // COMMIT VOUCHER NGAY KHI TẠO PAYMENT URL (FIRST-COME-FIRST-SERVED)
-        // Chỉ commit cho booking mới (không phải retry payment) và có voucher ở trạng thái "pending"
-        if (
-            !isRetryPayment &&
-            booking.voucherId &&
-            booking.voucherUsageStatus === 'pending' &&
-            booking.customerId
-        ) {
+        //   voucher CHO TỪNG BOOKING có voucher (kể cả nhiều ca)
+        //    Nếu ca nào commit fail (hết lượt / hết hạn) thì rollback lại các ca đã commit và báo lỗi.
+        if (!isRetryPayment) {
+            const committed = []; // lưu các booking đã commit để rollback nếu có lỗi
+
             try {
-                const usage = await commitVoucherUsage({
-                    voucherId: booking.voucherId,
-                    bookingId: booking._id,
-                    userId: booking.customerId,
-                    discountAmount: booking.voucherDiscount || 0,
-                    orderTotal: booking.fieldAmount || 0,
-                });
-                booking.voucherUsageId = usage._id;
-                booking.voucherUsageStatus = 'applied';
-                await booking.save();
+                for (const b of bookings) {
+                    if (b.voucherId && b.voucherUsageStatus === 'pending' && b.customerId) {
+                        const usage = await commitVoucherUsage({
+                            voucherId: b.voucherId,
+                            bookingId: b._id,
+                            userId: b.customerId,
+                            discountAmount: b.voucherDiscount || 0,
+                            orderTotal: b.fieldAmount || b.total || 0,
+                        });
+
+                        b.voucherUsageId = usage._id;
+                        b.voucherUsageStatus = 'applied';
+                        await b.save();
+
+                        committed.push(b);
+                    }
+                }
             } catch (error) {
-                //  Voucher đã hết lượt - trả về lỗi yêu cầu chọn voucher khác
+                console.error('❌ Lỗi commit voucher cho nhóm booking:', error);
+
+                // rollback lại những booking đã commit voucher trước đó
+                for (const b of committed) {
+                    try {
+                        await rollbackVoucherUsage(b.voucherId, b.customerId, b._id);
+                        b.voucherUsageStatus = 'pending';
+                        b.voucherUsageId = undefined;
+                        await b.save();
+                    } catch (rbErr) {
+                        console.error('⚠️ Lỗi rollback voucher khi commit fail:', rbErr);
+                    }
+                }
+
                 const isOutOfUsage =
                     error.statusCode === 409 ||
                     error.message?.includes('hết lượt') ||
@@ -164,12 +173,12 @@ export const createVnpayPayment = async (req, res, next) => {
                 if (isOutOfUsage) {
                     return res.status(409).json({
                         success: false,
-                        message: `Voucher "${booking.voucherCode || ''}" đã hết lượt sử dụng, vui lòng chọn voucher khác.`,
+                        message:
+                            'Voucher bạn chọn đã hết lượt sử dụng trong lúc thanh toán. Vui lòng chọn voucher khác.',
                         code: 'VOUCHER_OUT_OF_STOCK',
                     });
                 }
 
-                // Lỗi khác - trả về lỗi chung
                 return res.status(400).json({
                     success: false,
                     message: error.message || 'Không thể áp dụng voucher. Vui lòng thử lại.',
@@ -177,14 +186,21 @@ export const createVnpayPayment = async (req, res, next) => {
             }
         }
 
-        const orderId = booking.code;
+        // GHÉP NHIỀU MÃ BOOKING THÀNH 1 CHUỖI ĐỂ HIỂN THỊ Ở “Mã đơn hàng”
+        const bookingCodesStr = bookings
+            .map((b) => b.code)
+            .filter(Boolean)
+            .join(',');
+
+        const orderId = bookingCodesStr || booking.code; // vnp_TxnRef hiển thị: BKxxxxx,BKyyyy
+
         const createDate = new Date()
             .toISOString()
             .replace(/[-T:\.Z]/g, '')
             .slice(0, 14);
 
-        // VNPAY dùng đơn vị = VND * 100
         const vnpAmount = payNow * 100;
+        const bookingIdsStr = ids.join(',');
 
         const vnp_Params = {
             vnp_Version: '2.1.0',
@@ -193,7 +209,8 @@ export const createVnpayPayment = async (req, res, next) => {
             vnp_Locale: 'vn',
             vnp_CurrCode: 'VND',
             vnp_TxnRef: orderId,
-            vnp_OrderInfo: `Thanh toan cho don ${orderId}`,
+            // Lưu list booking để callback dùng
+            vnp_OrderInfo: `BOOKING_IDS=${bookingIdsStr}`,
             vnp_OrderType: 'billpayment',
             vnp_Amount: vnpAmount,
             vnp_ReturnUrl: VNP_RETURN_URL,
@@ -219,8 +236,7 @@ export const createVnpayPayment = async (req, res, next) => {
     }
 };
 
-// VNPAY callback
-
+//  VNPAY CALLBACK
 export const vnpayReturn = async (req, res, next) => {
     try {
         let vnp_Params = { ...req.query };
@@ -235,89 +251,185 @@ export const vnpayReturn = async (req, res, next) => {
         const hmac = crypto.createHmac('sha512', VNP_HASH_SECRET.trim());
         const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
 
-        // Sai chữ ký -> trả về FE báo invalid
         if (secureHash !== signed) {
             return res.redirect(`${FRONT_END_URL}/payment-return?status=invalid`);
         }
 
-        const rspCode = vnp_Params.vnp_ResponseCode; // '00' = thành công
-        const txnRef = vnp_Params.vnp_TxnRef; // booking.code
-        const amountFromVnp = Number(vnp_Params.vnp_Amount || 0); // đơn vị: VND * 100
-        const paidAmount = amountFromVnp / 100; // VND thực tế
+        const rspCode = vnp_Params.vnp_ResponseCode; // '00' = OK
+        const txnRef = vnp_Params.vnp_TxnRef; // có thể là "BK1,BK2" khi nhiều booking
+        const amountFromVnp = Number(vnp_Params.vnp_Amount || 0);
+        const paidAmount = amountFromVnp / 100;
 
-        // Tìm booking theo code
-        const booking = await Booking.findOne({ code: txnRef });
-        if (!booking) {
-            return res.redirect(`${FRONT_END_URL}/payment-return?status=notfound`);
+        //  LẤY NHÓM BOOKING THEO BOOKING_IDS (DECODE)
+        const rawOrderInfo = vnp_Params.vnp_OrderInfo || '';
+
+        let decodedOrderInfo = rawOrderInfo;
+        try {
+            // VNPay hay dùng dấu + thay cho space => đổi về space rồi decode
+            decodedOrderInfo = decodeURIComponent(rawOrderInfo.replace(/\+/g, ' '));
+
+            // nếu sau khi decode vẫn còn %3D / %2C thì decode thêm lần nữa
+            if (
+                decodedOrderInfo.includes('%3D') ||
+                decodedOrderInfo.includes('%2C') ||
+                decodedOrderInfo.includes('%3d') ||
+                decodedOrderInfo.includes('%2c')
+            ) {
+                decodedOrderInfo = decodeURIComponent(decodedOrderInfo);
+            }
+        } catch (e) {
+            console.error('⚠️ Lỗi decode vnp_OrderInfo:', e?.message || e);
         }
 
-        //  Ghi nhận tiền đã thanh toán (cộng dồn cọc + cập nhật paymentStatus)
-        // Cờ theo dõi trạng thái voucher trong quá trình thanh toán
-        let voucherStatus = 'none'; // none | applied | expired
+        const marker = 'BOOKING_IDS=';
+        let bookingIds = [];
+
+        const idx = decodedOrderInfo.indexOf(marker);
+        if (idx !== -1) {
+            const idsStr = decodedOrderInfo.slice(idx + marker.length);
+            bookingIds = idsStr
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean);
+        }
+
+        let bookings = [];
+
+        if (bookingIds.length > 0) {
+            bookings = await Booking.find({ _id: { $in: bookingIds } });
+            if (!bookings || bookings.length === 0) {
+                return res.redirect(`${FRONT_END_URL}/payment-return?status=notfound`);
+            }
+        } else {
+            // Fallback: luồng cũ – 1 booking
+            // Nếu vnp_TxnRef là "BK1,BK2" thì lấy BK1
+            let codeToFind = txnRef;
+            if (txnRef && txnRef.includes(',')) {
+                codeToFind = txnRef.split(',')[0].trim();
+            }
+
+            const booking = await Booking.findOne({ code: codeToFind });
+            if (!booking) {
+                return res.redirect(`${FRONT_END_URL}/payment-return?status=notfound`);
+            }
+            bookings = [booking];
+        }
+
+        let voucherStatus = 'none';
         let voucherErrorMessage = '';
 
+        //  THANH TOÁN THÀNH CÔNG
         if (rspCode === '00' && paidAmount > 0) {
-            const oldDeposit = Number(booking.depositAmount || 0);
-            const newDeposit = oldDeposit + paidAmount;
+            if (bookings.length > 1) {
+                //  NHIỀU BOOKING: chia số tiền thực tế cho từng booking
+                let remaining = paidAmount;
 
-            booking.depositAmount = newDeposit;
-            booking.depositMethod = PAYMENT_METHOD.VNPAY;
-            booking.depositStatus = DEPOSIT_STATUS.PAID;
+                const sortedBookings = bookings.sort(
+                    (a, b) =>
+                        new Date(a.date || a.createdAt).getTime() -
+                        new Date(b.date || b.createdAt).getTime()
+                );
 
-            const total = Number(booking.total || booking.fieldAmount || 0);
+                for (const b of sortedBookings) {
+                    if (remaining <= 0) break;
 
-            if (total > 0 && newDeposit >= total) {
-                booking.paymentStatus = PAYMENT_STATUS.PAID;
-            } else if (newDeposit > 0) {
-                booking.paymentStatus = PAYMENT_STATUS.PARTIAL;
+                    const total = Number(b.total || b.fieldAmount || 0);
+                    if (!total) continue;
+
+                    const currentDeposit =
+                        b.depositStatus === DEPOSIT_STATUS.PAID ? Number(b.depositAmount || 0) : 0;
+
+                    const need = Math.max(0, total - currentDeposit);
+                    if (need <= 0) continue;
+
+                    const add = Math.min(need, remaining);
+                    const newDeposit = currentDeposit + add;
+
+                    b.depositAmount = newDeposit;
+                    b.depositMethod = PAYMENT_METHOD.VNPAY;
+                    if (newDeposit > 0) {
+                        b.depositStatus = DEPOSIT_STATUS.PAID;
+                    }
+
+                    if (newDeposit >= total) {
+                        b.paymentStatus = PAYMENT_STATUS.PAID;
+                    } else if (newDeposit > 0) {
+                        b.paymentStatus = PAYMENT_STATUS.PARTIAL;
+                    } else {
+                        b.paymentStatus = PAYMENT_STATUS.UNPAID;
+                    }
+
+                    await b.save();
+                    remaining -= add;
+                }
             } else {
-                booking.paymentStatus = PAYMENT_STATUS.UNPAID;
-            }
+                //   BOOKING
+                const booking = bookings[0];
+                const oldDeposit = Number(booking.depositAmount || 0);
+                const newDeposit = oldDeposit + paidAmount;
 
-            // Voucher đã được commit ở createVnpayPayment, không cần commit lại ở đây
-            // Chỉ cập nhật status nếu cần
-            if (booking.voucherUsageStatus === 'applied') {
-                voucherStatus = 'applied';
-            }
+                booking.depositAmount = newDeposit;
+                booking.depositMethod = PAYMENT_METHOD.VNPAY;
+                booking.depositStatus = DEPOSIT_STATUS.PAID;
 
-            await booking.save();
+                const total = Number(booking.total || booking.fieldAmount || 0);
+                if (total > 0 && newDeposit >= total) {
+                    booking.paymentStatus = PAYMENT_STATUS.PAID;
+                } else if (newDeposit > 0) {
+                    booking.paymentStatus = PAYMENT_STATUS.PARTIAL;
+                } else {
+                    booking.paymentStatus = PAYMENT_STATUS.UNPAID;
+                }
+
+                if (booking.voucherUsageStatus === 'applied') {
+                    voucherStatus = 'applied';
+                }
+
+                await booking.save();
+            }
         } else {
-            // ⚠️ THANH TOÁN THẤT BẠI - ROLLBACK VOUCHER
-            // Nếu voucher đã được commit (status = 'applied'), cần rollback
-            if (
-                booking.voucherId &&
-                booking.voucherUsageStatus === 'applied' &&
-                booking.voucherUsageId &&
-                booking.customerId
-            ) {
-                try {
-                    await rollbackVoucherUsage(booking.voucherId, booking.customerId, booking._id);
-                    booking.voucherUsageStatus = 'restored';
-                    booking.voucherRestoredAt = new Date();
-                    await booking.save();
-                    console.log(
-                        `✅ Đã rollback voucher cho booking ${booking.code} do thanh toán thất bại`
-                    );
-                } catch (error) {
-                    console.error('❌ Lỗi khi rollback voucher:', error.message);
+            //  THANH TOÁN THẤT BẠI – rollback voucher cho TẤT CẢ booking đã applied
+            for (const booking of bookings) {
+                if (
+                    booking.voucherId &&
+                    booking.voucherUsageStatus === 'applied' &&
+                    booking.voucherUsageId &&
+                    booking.customerId
+                ) {
+                    try {
+                        await rollbackVoucherUsage(
+                            booking.voucherId,
+                            booking.customerId,
+                            booking._id
+                        );
+                        booking.voucherUsageStatus = 'restored';
+                        booking.voucherRestoredAt = new Date();
+                        await booking.save();
+                        // console.log(
+                        //     ` Đã rollback voucher cho booking ${booking.code} do thanh toán thất bại`
+                        // );
+                    } catch (error) {
+                        console.error('❌ Lỗi khi rollback voucher:', error.message);
+                    }
                 }
             }
         }
 
-        // Bắn socket cho FE cập nhật lịch sân
+        // Bắn socket cho FE
         const io = req.app.get('io');
         io?.emit('booking_global_updated');
-        io?.to(String(booking.courtId)).emit('booking_updated', {
-            courtId: String(booking.courtId),
-            date: booking.date.toISOString().slice(0, 10),
-        });
+        for (const b of bookings) {
+            io?.to(String(b.courtId)).emit('booking_updated', {
+                courtId: String(b.courtId),
+                date: b.date.toISOString().slice(0, 10),
+            });
+        }
 
         const queryParams = {
             ...req.query,
             status: rspCode,
         };
 
-        // Nếu voucher đã hết lượt trong quá trình thanh toán, gửi thêm trạng thái & thông báo chi tiết
         if (voucherStatus === 'expired') {
             queryParams.voucherStatus = 'expired';
             queryParams.voucherMessage =
@@ -326,7 +438,6 @@ export const vnpayReturn = async (req, res, next) => {
         }
 
         const query = new URLSearchParams(queryParams).toString();
-
         return res.redirect(`${FRONT_END_URL}/payment-return?${query}`);
     } catch (err) {
         next(err);
