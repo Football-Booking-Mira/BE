@@ -1,4 +1,3 @@
-// modules/orders/order.models.js
 import mongoose from 'mongoose';
 import { PAYMENT_STATUS, PAYMENT_METHOD } from '../../common/constants/enums.js';
 
@@ -15,8 +14,6 @@ const OrderSchema = new Schema(
             unique: true,
             trim: true,
         },
-
-        // đổi từ userId -> customerId cho giống Booking
         customerId: {
             type: ObjectId,
             ref: 'User',
@@ -31,7 +28,6 @@ const OrderSchema = new Schema(
             },
         ],
 
-        // đổi từ totalPrice -> total (hoặc ngược lại, miễn là đồng nhất)
         total: {
             type: Number,
             required: true,
