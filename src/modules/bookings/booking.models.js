@@ -299,6 +299,11 @@ const BookingSchema = new Schema(
             default: null,
             index: true, // để query nhanh hơn
         },
+        orderId: {
+            type: Schema.Types.ObjectId,
+            ref: 'Order',
+            default: null, // booking lẻ thì null, booking thuộc đơn gộp thì set Order._id
+        },
     },
     {
         timestamps: true,
