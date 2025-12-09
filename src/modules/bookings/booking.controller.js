@@ -5,6 +5,7 @@ import {
     USER_ROLES,
     DEPOSIT_STATUS,
 } from '../../common/constants/enums.js';
+import Order from '../orders/order.models.js';
 import createError from '../../utils/error.js';
 import handleAsync from '../../utils/handleAsync.js';
 import createResponse from '../../utils/responses.js';
@@ -24,6 +25,40 @@ const toMinutes = (t) => {
 };
 
 const overlap = (a1, a2, b1, b2) => Math.max(0, Math.min(a2, b2) - Math.max(a1, b1));
+
+// Xác định 1 booking có thực sự "giữ sân" hay không
+const isBlockingBooking = (b) => {
+    // Đơn đã hủy thì không bao giờ block
+    if (b.status === BOOKING_STATUS.CANCELLED) return false;
+
+    // Booking tạm trong createMultiBooking (không có paymentMethod/createdBy)
+    // dùng để tránh 2 slot trong cùng request đè nhau -> luôn block
+    if (!b.paymentMethod && !b.createdBy && b.slots) {
+        return true;
+    }
+
+    const depositPaid = (b.depositAmount || 0) > 0 && b.depositStatus === DEPOSIT_STATUS.PAID;
+
+    // Xem đã có tiền chưa
+    const hasPaid =
+        b.paymentStatus === PAYMENT_STATUS.PAID ||
+        b.paymentStatus === PAYMENT_STATUS.REFUNDED ||
+        depositPaid;
+
+    // Đơn do ADMIN tạo hoặc thanh toán CASH tại quầy -> luôn giữ sân
+    if (b.createdBy === USER_ROLES.ADMIN || b.paymentMethod === PAYMENT_METHOD.CASH) {
+        return true;
+    }
+
+    // Đơn ONLINE (VNPAY / MOMO):
+    // chỉ giữ sân khi đã có tiền (paid / refunded / đã cọc)
+    if ([PAYMENT_METHOD.VNPAY, PAYMENT_METHOD.MOMO].includes(b.paymentMethod)) {
+        return !!hasPaid;
+    }
+
+    // Các loại khác: có tiền thì block, không thì thôi
+    return !!hasPaid;
+};
 
 // Chuyển 1 danh sách slot thành list khoảng thời gian (đơn vị: phút)
 const buildIntervalsFromSlots = (slots = [], fallbackStart, fallbackEnd) => {
@@ -55,6 +90,11 @@ const hasAnyOverlapWithBookings = (
 
     for (const b of existingBookings) {
         if (ignoreBookingId && String(b._id) === String(ignoreBookingId)) continue;
+
+        // chỉ check đụng với booking THỰC SỰ giữ sân
+        // - booking DB: lọc bằng isBlockingBooking
+        // - booking tạm (createMultiBooking) không có paymentMethod/createdBy nhưng có slots -> luôn block (đã xử lý trong isBlockingBooking)
+        if (!isBlockingBooking(b)) continue;
 
         const bookingIntervals = buildIntervalsFromSlots(b.slots, b.startTime, b.endTime);
 
@@ -657,6 +697,37 @@ export const createBooking = handleAsync(async (req, res, next) => {
 
         createdBookings.push(booking);
     }
+    // === TẠO ORDER GỘP NẾU LÀ ĐƠN ONLINE NHIỀU NHÓM SLOT ===
+    // Điều kiện:
+    //  - Có từ 2 booking trở lên (tức là 2 ca tách nhau)
+    //  - Và là đơn online (VNPAY / MOMO)
+    if (createdBookings.length > 1 && isOnlineMode) {
+        const totalOrderAmount = createdBookings.reduce(
+            (sum, b) => sum + Number(b.total || b.fieldAmount || 0),
+            0
+        );
+
+        const order = await Order.create({
+            code: `OD${Date.now().toString().slice(-6)}`, // ví dụ: OD123456
+            customerId: finalCustomerId,
+            bookings: createdBookings.map((b) => b._id),
+            total: totalOrderAmount,
+            paymentStatus: PAYMENT_STATUS.UNPAID,
+            paymentMethod,
+            status: 'PENDING',
+        });
+
+        // gán orderId cho từng booking trong DB
+        await Booking.updateMany(
+            { _id: { $in: createdBookings.map((b) => b._id) } },
+            { $set: { orderId: order._id } }
+        );
+
+        // gán lại vào object đang giữ trong RAM để FE có thể dùng luôn nếu cần
+        createdBookings.forEach((b) => {
+            b.orderId = order._id;
+        });
+    }
 
     const io = req.app.get('io');
     io?.emit('booking_global_updated');
@@ -665,8 +736,7 @@ export const createBooking = handleAsync(async (req, res, next) => {
         date: new Date(date).toISOString().slice(0, 10),
     });
 
-    // Backward-compatible:
-    //  - 1 nhóm slot  -> trả về 1 booking (như cũ)
+    //  - 1 nhóm slot  -> trả về 1 booking
     //  - nhiều nhóm   -> trả về mảng booking
     if (createdBookings.length === 1) {
         return res
@@ -688,13 +758,11 @@ export const getBookingsByCourt = handleAsync(async (req, res, next) => {
         return next(createError(400, 'Thiếu courtId!'));
     }
 
-    // Bất kỳ booking nào KHÔNG bị hủy đều chặn slot (pending, confirmed, in_use, completed...)
     const filter = {
         courtId,
         status: { $ne: BOOKING_STATUS.CANCELLED },
     };
 
-    // Nếu FE truyền startDate & endDate (yyyy-mm-dd)
     if (startDate && endDate) {
         const from = new Date(startDate);
         from.setHours(0, 0, 0, 0);
@@ -705,9 +773,15 @@ export const getBookingsByCourt = handleAsync(async (req, res, next) => {
         filter.date = { $gte: from, $lte: to };
     }
 
-    const bookings = await Booking.find(filter).select('date startTime endTime status slots');
+    // cần thêm các field liên quan đến thanh toán để isBlockingBooking xử lý
+    const allBookings = await Booking.find(filter).select(
+        'date startTime endTime status slots paymentStatus paymentMethod depositStatus depositAmount createdBy'
+    );
 
-    return res.json(createResponse(true, 200, 'Danh sách giờ đã được đặt', bookings));
+    // chỉ những booking giữ sân mới được trả về cho FE
+    const blockingBookings = allBookings.filter((b) => isBlockingBooking(b));
+
+    return res.json(createResponse(true, 200, 'Danh sách giờ đã được đặt', blockingBookings));
 });
 
 //* Hủy booking
@@ -755,7 +829,34 @@ export const cancelBooking = handleAsync(async (req, res, next) => {
         booking.cancelNote = internalNote.trim();
     }
 
-    //CHỈ restore voucher nếu đã commit (status = "applied")
+    //  TỰ TẠO FLOW HOÀN TIỀN KHI ADMIN HỦY ĐƠN ONLINE ĐÃ THANH TOÁN / ĐÃ CỌC
+    const isAdmin = user.role === USER_ROLES.ADMIN;
+    const isPaidOrPartial = [PAYMENT_STATUS.PAID, PAYMENT_STATUS.PARTIAL].includes(
+        booking.paymentStatus
+    );
+    const isOnlinePayment = [PAYMENT_METHOD.VNPAY, PAYMENT_METHOD.MOMO].includes(
+        booking.paymentMethod
+    );
+
+    // Điều kiện:
+    //  - Admin hủy
+    //  - Đơn đã thanh toán hoặc đã cọc
+    //  - Thanh toán ONLINE
+    //  - Chưa có flow hoàn tiền trước đó
+    if (
+        isAdmin &&
+        isPaidOrPartial &&
+        isOnlinePayment &&
+        (!booking.refundStatus || booking.refundStatus === 'none')
+    ) {
+        booking.refundStatus = 'processing';
+        booking.refundAdminReason =
+            (internalNote && internalNote.trim()) ||
+            (reason && reason.trim()) ||
+            'Admin hủy đơn online và đang xử lý hoàn tiền cho khách';
+    }
+
+    // CHỈ restore voucher nếu đã commit (status = "applied")
     // Nếu voucher chưa commit (status = "pending"), không cần restore vì chưa bị trừ lượt
     if (
         booking.voucherUsageId &&
@@ -957,24 +1058,24 @@ export const checkinBooking = handleAsync(async (req, res, next) => {
 
     //* Không cho checkin trước ngày đá
     //* booking.date có thể là Date hoặc string, ép sang Date rồi so theo ngày
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()); //giờ checkin
-    const bookingDateObj = new Date(booking.date);
-    const bookingDate = new Date(
-        bookingDateObj.getFullYear(),
-        bookingDateObj.getMonth(),
-        bookingDateObj.getDate()
-    ); //*00:00 Đặt sân
-    if (bookingDate.getTime() > today.getTime()) {
-        return next(
-            createError(
-                400,
-                `Không thể check-in trước ngày đá. Chỉ được check-in từ 00:00 ngày ${bookingDate.toLocaleDateString(
-                    'vi-VN'
-                )} `
-            )
-        );
-    }
+    // const now = new Date();
+    // const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()); //giờ checkin
+    // const bookingDateObj = new Date(booking.date);
+    // const bookingDate = new Date(
+    //     bookingDateObj.getFullYear(),
+    //     bookingDateObj.getMonth(),
+    //     bookingDateObj.getDate()
+    // ); //*00:00 Đặt sân
+    // if (bookingDate.getTime() > today.getTime()) {
+    //     return next(
+    //         createError(
+    //             400,
+    //             `Không thể check-in trước ngày đá. Chỉ được check-in từ 00:00 ngày ${bookingDate.toLocaleDateString(
+    //                 'vi-VN'
+    //             )} `
+    //         )
+    //     );
+    // }
 
     //* Xóa booking_items cũ (nếu có) rồi tạo lại
     await BookingItem.deleteMany({ bookingId });
@@ -1468,7 +1569,8 @@ export const getBookingsByUser = handleAsync(async (req, res, next) => {
         createResponse(true, 200, 'Lấy danh sách booking của người dùng thành công!', bookings)
     );
 });
-// * Lấy thông tin để thanh toán lại cho 1 booking
+
+// * Lấy thông tin để thanh toán lại (booking lẻ HOẶC đơn gộp)
 export const getRetryPaymentInfo = handleAsync(async (req, res, next) => {
     const bookingId = req.params.id;
 
@@ -1482,7 +1584,10 @@ export const getRetryPaymentInfo = handleAsync(async (req, res, next) => {
     const user = req.user;
 
     // chỉ cho phép CHÍNH CHỦ user xem lại
-    if (user?.role === USER_ROLES.USER && String(booking.customerId?._id) !== String(user._id)) {
+    if (
+        user?.role === USER_ROLES.USER &&
+        String(booking.customerId?._id || booking.customerId) !== String(user._id)
+    ) {
         return next(createError(403, 'Bạn không có quyền thanh toán lại đơn này!'));
     }
 
@@ -1498,7 +1603,7 @@ export const getRetryPaymentInfo = handleAsync(async (req, res, next) => {
         return next(
             createError(
                 400,
-                'Đơn này không thanh toán bằng VNPAY nên không thể thanh toán lại online!'
+                'Đơn này không thanh toán bằng VNPay nên không thể thanh toán lại online!'
             )
         );
     }
@@ -1513,9 +1618,109 @@ export const getRetryPaymentInfo = handleAsync(async (req, res, next) => {
         );
     }
 
+    // ================== HÀM CHECK SLOT CÒN TRỐNG HAY KHÔNG ==================
+    const checkSlotAvailable = async (b) => {
+        const day = new Date(b.date);
+        if (Number.isNaN(day.getTime())) return;
+
+        day.setHours(0, 0, 0, 0);
+        const nextDay = new Date(day);
+        nextDay.setDate(day.getDate() + 1);
+
+        // lấy tất cả booking cùng sân + ngày (trừ CANCELLED & trừ chính nó)
+        const bookingsSameDay = await Booking.find({
+            courtId: b.courtId,
+            date: { $gte: day, $lt: nextDay },
+            status: { $ne: BOOKING_STATUS.CANCELLED },
+            _id: { $ne: b._id },
+        }).lean();
+
+        const requestSlots =
+            Array.isArray(b.slots) && b.slots.length > 0
+                ? b.slots.map((s) => ({ startTime: s.startTime, endTime: s.endTime }))
+                : [{ startTime: b.startTime, endTime: b.endTime }];
+
+        // dùng lại hàm hasAnyOverlapWithBookings (đã filter bằng isBlockingBooking)
+        if (hasAnyOverlapWithBookings(requestSlots, bookingsSameDay)) {
+            const dateStr = new Date(b.date).toLocaleDateString('vi-VN');
+            const timeStr = requestSlots.map((s) => `${s.startTime} - ${s.endTime}`).join(', ');
+
+            throw createError(
+                400,
+                `Khung giờ ${timeStr} ngày ${dateStr} đã được khách khác thanh toán trước. Đơn của bạn không thể thanh toán lại, vui lòng đặt sân mới hoặc chọn khung giờ khác.`
+            );
+        }
+    };
+    // =======================================================================
+
+    // Nếu booking thuộc order gộp -> xử lý riêng
+    if (booking.orderId) {
+        const order = await Order.findById(booking.orderId).lean();
+        if (!order) {
+            console.warn('[getRetryPaymentInfo] orderId tồn tại nhưng không tìm thấy Order');
+        } else {
+            const orderBookings = await Booking.find({ orderId: booking.orderId }).lean();
+
+            const payableBookings = orderBookings.filter(
+                (b) =>
+                    b.status === BOOKING_STATUS.PENDING &&
+                    ![PAYMENT_STATUS.PAID, PAYMENT_STATUS.REFUNDED].includes(b.paymentStatus)
+            );
+
+            if (payableBookings.length === 0) {
+                return next(
+                    createError(
+                        400,
+                        'Tất cả các ca trong đơn này đã được thanh toán hoặc hoàn tiền!'
+                    )
+                );
+            }
+
+            // ❗ CHECK lại từng ca xem còn trống hay đã bị khách khác chốt trước
+            for (const b of payableBookings) {
+                await checkSlotAvailable(b);
+            }
+
+            const total = payableBookings.reduce(
+                (sum, b) => sum + Number(b.total || b.fieldAmount || 0),
+                0
+            );
+
+            const depositPaid = payableBookings.reduce((sum, b) => {
+                if (b.depositStatus === DEPOSIT_STATUS.PAID) {
+                    return sum + Number(b.depositAmount || 0);
+                }
+                return sum;
+            }, 0);
+
+            const amountToPay = Math.max(0, total - depositPaid);
+            if (amountToPay <= 0) {
+                return next(createError(400, 'Đơn này đã thanh toán đủ tiền!'));
+            }
+
+            return res.json(
+                createResponse(true, 200, 'Lấy thông tin thanh toán lại thành công!', {
+                    type: 'order',
+                    orderId: order._id,
+                    bookingIds: payableBookings.map((b) => b._id),
+                    status: order.status,
+                    paymentStatus: order.paymentStatus,
+                    total,
+                    paidAmount: depositPaid,
+                    amountToPay,
+                    court: booking.courtId,
+                    customer: booking.customerId,
+                    date: booking.date,
+                })
+            );
+        }
+    }
+
+    // ===== BOOKING LẺ =====
+    await checkSlotAvailable(booking); // check 1 lần trước khi cho thanh toán
+
     const total = Number(booking.total || booking.fieldAmount || 0);
 
-    // tiền đã trả (đặt cọc)
     const depositPaid =
         booking.depositStatus === DEPOSIT_STATUS.PAID ? Number(booking.depositAmount || 0) : 0;
 
@@ -1527,6 +1732,7 @@ export const getRetryPaymentInfo = handleAsync(async (req, res, next) => {
 
     return res.json(
         createResponse(true, 200, 'Lấy thông tin thanh toán lại thành công!', {
+            type: 'booking',
             bookingId: booking._id,
             status: booking.status,
             paymentStatus: booking.paymentStatus,
@@ -1541,6 +1747,7 @@ export const getRetryPaymentInfo = handleAsync(async (req, res, next) => {
         })
     );
 });
+
 //*từ chối hoàn tiền
 export const rejectRefundBooking = handleAsync(async (req, res, next) => {
     const { id } = req.params;
