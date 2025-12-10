@@ -9,8 +9,8 @@ import routesBookingItem from "../modules/bookingItems/bookingItem.routes.js";
 import userRouter from "../modules/users/user.routes.js";
 import uploadRoutes from "../common/routes/upload.routes.js";
 import voucherRoutes from "../modules/vouchers/voucher.routes.js";
-
 import routesReport from "../modules/reports/report.routes.js";
+import routerReview from "../modules/review/review.routes.js";
 
 const routes = Router();
 
@@ -25,5 +25,6 @@ routes.use("/users", userRouter);
 routes.use("/upload", uploadRoutes);
 routes.use("/vouchers", voucherRoutes);
 routes.use("/reports", routesReport);
+routes.use("/review", routerReview);
 
 export default routes;
