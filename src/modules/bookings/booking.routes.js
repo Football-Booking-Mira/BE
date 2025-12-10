@@ -2,8 +2,7 @@ import { Router } from 'express';
 import { USER_ROLES } from '../../common/constants/enums.js';
 import { authenticate, authorize } from '../../common/middlewares/auth.middleware.js';
 import validBodyRequest from '../../common/middlewares/validBodyRequest.js';
-import { bookingSchema } from './booking.schema.js';
-import { multiBookingSchema } from './booking.schema.js';
+import { bookingSchema, multiBookingSchema } from './booking.schema.js';
 
 import {
     createBooking,
@@ -32,11 +31,13 @@ import {
 
 const routesBooking = Router();
 
+// Tạo / lấy danh sách booking
 routesBooking
     .route('/')
     .post(authenticate, validBodyRequest(bookingSchema), createBooking)
     .get(authenticate, getBookings);
 
+// Tạo booking nhiều ca (multi)
 routesBooking.post(
     '/multi',
     authenticate,
@@ -44,33 +45,40 @@ routesBooking.post(
     createMultiBooking
 );
 
+// Booking theo user / theo sân
 routesBooking.get('/user/:userId', authenticate, getBookingsByUser);
 routesBooking.get('/court/:courtId', getBookingsByCourt);
+
+// Tính tiền
 routesBooking.get('/calculate', calculateBookingPrice);
 routesBooking.post('/calculate', calculateBookingPrice);
 
+// Dashboard admin
 routesBooking.get(
     '/admin/dashboard',
     authenticate,
     authorize(USER_ROLES.ADMIN),
     getAdminDashboardBookings
 );
-// ĐANG DÙNG
+
+// LẤY THÔNG TIN THANH TOÁN LẠI (VNPay)
 routesBooking.get('/:id/retry-payment-info', authenticate, getRetryPaymentInfo);
 
-//* ADMIN cập nhật thanh toán
+// ADMIN cập nhật thanh toán
 routesBooking.patch('/:id', authenticate, authorize(USER_ROLES.ADMIN), updateBooking);
 
-//* ADMIN chỉnh giờ / sân
+// ADMIN chỉnh giờ / sân
 routesBooking.patch('/:id/time', authenticate, authorize(USER_ROLES.ADMIN), updateBookingTime);
 
+//  ROUTE CẬP NHẬT TRẠNG THÁI HOÀN TIỀN (pending <-> processing)
 routesBooking.patch(
     '/:id/refund-status',
     authenticate,
     authorize(USER_ROLES.ADMIN),
     updateRefundStatus
 );
-// Admin xử lý hoàn tiền
+
+// Admin xử lý hoàn tiền: từ chối
 routesBooking.post(
     '/:id/refund/reject',
     authenticate,
@@ -78,6 +86,7 @@ routesBooking.post(
     rejectRefundBooking
 );
 
+// Admin xử lý hoàn tiền: hoàn tiền xong + upload bill
 routesBooking.post(
     '/:id/refund/complete',
     authenticate,
@@ -85,18 +94,23 @@ routesBooking.post(
     completeRefundBooking
 );
 
-//* USER gửi yêu cầu hoàn tiền
+// USER gửi yêu cầu hoàn tiền
 routesBooking.post('/:id/refund-request', authenticate, authorize(USER_ROLES.USER), requestRefund);
-//* hủy , xác nhận ,checkin ,checkout
+
+// Hủy / xác nhận / checkin / checkout
 routesBooking.patch('/:id/cancel', authenticate, cancelBooking);
+
 routesBooking.patch('/:id/confirm', authenticate, authorize(USER_ROLES.ADMIN), confirmBooking);
+
 routesBooking.patch('/:id/checkin', authenticate, authorize(USER_ROLES.ADMIN), checkinBooking);
+
 routesBooking.patch(
     '/:id/equipments',
     authenticate,
     authorize(USER_ROLES.ADMIN),
     addEquipmentsBooking
 );
+
 // Admin xem chi tiết đơn + thiết bị
 routesBooking.get(
     '/:id/admin-detail',
@@ -104,17 +118,22 @@ routesBooking.get(
     authorize(USER_ROLES.ADMIN),
     getBookingDetailAdmin
 );
-// LẤY THIẾT BỊ CỦA ĐƠN (cho admin xem / prefill)
+
+// Lấy thiết bị của đơn (cho modal xem chi tiết / prefill thêm thiết bị)
 routesBooking.get(
     '/:id/equipments-detail',
     authenticate,
     authorize(USER_ROLES.ADMIN),
     getBookingEquipmentsDetail
 );
+
+// Checkout
 routesBooking.patch('/:id/checkout', authenticate, authorize(USER_ROLES.ADMIN), checkoutBooking);
-routesBooking.post('/payment/vietqr', async (req, res) => {
+
+// Tạo mã VietQR để thanh toán
+routesBooking.post('/payment/vietqr', authenticate, async (req, res) => {
     try {
-        const { bookingId, amount, customer } = req.body;
+        const { bookingId, amount } = req.body;
 
         const response = await fetch('https://api.vietqr.io/v2/generate', {
             method: 'POST',
@@ -133,9 +152,8 @@ routesBooking.post('/payment/vietqr', async (req, res) => {
 
         console.log('VietQR API trả về:', data);
 
-        // ❗ Nếu API lỗi hoặc không có data
         if (!data?.data?.qrDataURL) {
-            return res.json({
+            return res.status(500).json({
                 success: false,
                 message: 'Không nhận được mã QR từ VietQR!',
             });
@@ -144,18 +162,18 @@ routesBooking.post('/payment/vietqr', async (req, res) => {
         return res.json({
             success: true,
             data: {
-                qrImageBase64: data.data.qrDataURL, // ảnh QR base64
-                qrString: data.data.qrString, // raw string nếu cần
+                qrImageBase64: data.data.qrDataURL,
+                qrString: data.data.qrString,
                 amount,
             },
         });
     } catch (e) {
-        console.log(e);
-        return res.json({ success: false, message: 'Lỗi tạo VietQR' });
+        console.error(e);
+        return res.status(500).json({ success: false, message: 'Lỗi tạo VietQR' });
     }
 });
 
-//admin hủy tiền cọc tại quầy
+// Admin hủy đơn thanh toán tiền mặt / COD
 routesBooking.post(
     '/:id/admin-cancel-cash',
     authenticate,
