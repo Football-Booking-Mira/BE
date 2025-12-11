@@ -985,71 +985,71 @@ export const checkinBooking = handleAsync(async (req, res, next) => {
         return next(createError(400, 'Chỉ đơn đã xác nhận mới được check-in'));
     }
 
-    // ==== GIỚI HẠN THỜI GIAN CHECK-IN ====
-    const now = new Date();
+    // //  GIỚI HẠN THỜI GIAN CHECK-IN
+    // const now = new Date();
 
-    const bookingDate = new Date(booking.date);
-    if (Number.isNaN(bookingDate.getTime())) {
-        return next(createError(400, 'Ngày đặt của booking không hợp lệ!'));
-    }
+    // const bookingDate = new Date(booking.date);
+    // if (Number.isNaN(bookingDate.getTime())) {
+    //     return next(createError(400, 'Ngày đặt của booking không hợp lệ!'));
+    // }
 
-    // So sánh theo "ngày" (bỏ giờ phút giây)
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const matchDay = new Date(
-        bookingDate.getFullYear(),
-        bookingDate.getMonth(),
-        bookingDate.getDate()
-    );
+    // // So sánh theo "ngày" (bỏ giờ phút giây)
+    // const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    // const matchDay = new Date(
+    //     bookingDate.getFullYear(),
+    //     bookingDate.getMonth(),
+    //     bookingDate.getDate()
+    // );
 
-    // ❌ Nếu chưa đúng ngày đá -> không cho check-in
-    if (today.getTime() !== matchDay.getTime()) {
-        return next(
-            createError(
-                400,
-                'Chỉ được check-in trong đúng ngày diễn ra lịch đá (không được check-in trước ngày)!'
-            )
-        );
-    }
+    // // Nếu chưa đúng ngày đá -> không cho check-in
+    // if (today.getTime() !== matchDay.getTime()) {
+    //     return next(
+    //         createError(
+    //             400,
+    //             'Chỉ được check-in trong đúng ngày diễn ra lịch đá (không được check-in trước ngày)!'
+    //         )
+    //     );
+    // }
 
-    // Lấy giờ bắt đầu sớm nhất của booking (nếu có slots thì dùng slots)
-    let earliestStart = booking.startTime;
-    if (Array.isArray(booking.slots) && booking.slots.length > 0) {
-        const sortedSlots = [...booking.slots].sort(
-            (a, b) => toMinutes(a.startTime) - toMinutes(b.startTime)
-        );
-        earliestStart = sortedSlots[0].startTime;
-    }
+    // // Lấy giờ bắt đầu sớm nhất của booking (nếu có slots thì dùng slots)
+    // let earliestStart = booking.startTime;
+    // if (Array.isArray(booking.slots) && booking.slots.length > 0) {
+    //     const sortedSlots = [...booking.slots].sort(
+    //         (a, b) => toMinutes(a.startTime) - toMinutes(b.startTime)
+    //     );
+    //     earliestStart = sortedSlots[0].startTime;
+    // }
 
-    if (!earliestStart) {
-        return next(createError(400, 'Booking không có thông tin giờ bắt đầu để check-in!'));
-    }
+    // if (!earliestStart) {
+    //     return next(createError(400, 'Booking không có thông tin giờ bắt đầu để check-in!'));
+    // }
 
-    const [sh, sm] = earliestStart.split(':').map(Number);
-    const matchStartDateTime = new Date(
-        bookingDate.getFullYear(),
-        bookingDate.getMonth(),
-        bookingDate.getDate(),
-        sh || 0,
-        sm || 0,
-        0,
-        0
-    );
+    // const [sh, sm] = earliestStart.split(':').map(Number);
+    // const matchStartDateTime = new Date(
+    //     bookingDate.getFullYear(),
+    //     bookingDate.getMonth(),
+    //     bookingDate.getDate(),
+    //     sh || 0,
+    //     sm || 0,
+    //     0,
+    //     0
+    // );
 
-    // Thời điểm được phép bắt đầu check-in = giờ đá - 15 phút
-    const allowFrom = new Date(matchStartDateTime.getTime() - CHECKIN_BEFORE_MINUTES * 60 * 1000);
+    // // Thời điểm được phép bắt đầu check-in = giờ đá - 15 phút
+    // const allowFrom = new Date(matchStartDateTime.getTime() - CHECKIN_BEFORE_MINUTES * 60 * 1000);
 
-    //  Nếu đang check-in trước thời điểm cho phép
-    if (now.getTime() < allowFrom.getTime()) {
-        const hh = String(allowFrom.getHours()).padStart(2, '0');
-        const mm = String(allowFrom.getMinutes()).padStart(2, '0');
+    // //  Nếu đang check-in trước thời điểm cho phép
+    // if (now.getTime() < allowFrom.getTime()) {
+    //     const hh = String(allowFrom.getHours()).padStart(2, '0');
+    //     const mm = String(allowFrom.getMinutes()).padStart(2, '0');
 
-        return next(
-            createError(
-                400,
-                `Chỉ được check-in trước giờ đá tối đa ${CHECKIN_BEFORE_MINUTES} phút (từ ${hh}:${mm} trở đi)!`
-            )
-        );
-    }
+    //     return next(
+    //         createError(
+    //             400,
+    //             `Chỉ được check-in trước giờ đá tối đa ${CHECKIN_BEFORE_MINUTES} phút (từ ${hh}:${mm} trở đi)!`
+    //         )
+    //     );
+    // }
 
     // Xóa thiết bị cũ (nếu có) rồi thêm lại theo lần check-in hiện tại
     await BookingItem.deleteMany({ bookingId });
@@ -1504,6 +1504,7 @@ export const getBookingsByUser = handleAsync(async (req, res, next) => {
     const userId = req.params.userId || req.user?._id;
     if (!userId) return next(createError(400, 'Thiếu userId!'));
 
+    //  Lấy list booking như cũ
     const bookings = await Booking.find({ customerId: userId })
         .populate('courtId', 'name type images image address')
         .populate('customerId', 'name username phone email')
@@ -1511,8 +1512,35 @@ export const getBookingsByUser = handleAsync(async (req, res, next) => {
         .sort({ createdAt: -1 })
         .lean();
 
+    //  Lấy tất cả BookingItem của các booking đó
+    const bookingIds = bookings.map((b) => b._id);
+    const items = await BookingItem.find({ bookingId: { $in: bookingIds } })
+        .select('bookingId name mode qty price subtotal unit')
+        .lean();
+
+    //  Gom item theo bookingId
+    const itemsByBooking = {};
+    for (const it of items) {
+        const key = String(it.bookingId);
+        if (!itemsByBooking[key]) itemsByBooking[key] = [];
+        itemsByBooking[key].push({
+            name: it.name,
+            mode: it.mode, // 'rent' | 'sell'
+            qty: it.qty,
+            unit: it.unit,
+            price: it.price,
+            subtotal: it.subtotal,
+        });
+    }
+
+    // Gắn thêm field equipmentItems vào từng booking
+    const result = bookings.map((b) => ({
+        ...b,
+        equipmentItems: itemsByBooking[String(b._id)] || [],
+    }));
+
     return res.json(
-        createResponse(true, 200, 'Lấy danh sách booking của người dùng thành công!', bookings)
+        createResponse(true, 200, 'Lấy danh sách booking của người dùng thành công!', result)
     );
 });
 
