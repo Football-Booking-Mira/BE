@@ -24,7 +24,7 @@ routes.use("/booking-items", routesBookingItem);
 routes.use("/users", userRouter);
 routes.use("/upload", uploadRoutes);
 routes.use("/vouchers", voucherRoutes);
-routes.use("/reports", routesReport);
 routes.use("/review", routerReview);
+routes.use("/reports", routesReport);
 
 export default routes;
