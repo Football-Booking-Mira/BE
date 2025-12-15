@@ -11,7 +11,7 @@ import uploadRoutes from "../common/routes/upload.routes.js";
 import voucherRoutes from "../modules/vouchers/voucher.routes.js";
 import routesReport from "../modules/reports/report.routes.js";
 import routerReview from "../modules/review/review.routes.js";
-
+import contactRouter from "../modules/contacts/contact.routes.js";
 const routes = Router();
 
 routes.use("/courts", routesCourt);
@@ -26,5 +26,5 @@ routes.use("/upload", uploadRoutes);
 routes.use("/vouchers", voucherRoutes);
 routes.use("/review", routerReview);
 routes.use("/reports", routesReport);
-
+routes.use("/contacts", contactRouter);
 export default routes;
