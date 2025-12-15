@@ -13,6 +13,8 @@ import BookingItem from '../bookingItems/bookingItem.models.js';
 import { Court } from '../courts/court.models.js';
 import Equipment from '../equipments/equipment.models.js';
 import Booking from './booking.models.js';
+import InvoiceModel from '../invoices/invoice.models.js';
+
 import {
     commitVoucherUsage,
     restoreVoucherUsage,
@@ -1496,7 +1498,23 @@ export const getBookings = handleAsync(async (req, res, next) => {
         .sort({ createdAt: -1 })
         .lean();
 
-    return res.json(createResponse(true, 200, 'Lấy danh sách booking thành công!', bookings));
+    //  GẮN hasInvoice / invoiceId
+    const bookingIds = bookings.map((b) => b._id);
+
+    const invoices = await InvoiceModel.find(
+        { bookingId: { $in: bookingIds } },
+        { _id: 1, bookingId: 1 }
+    ).lean();
+
+    const invoiceMap = new Map(invoices.map((i) => [String(i.bookingId), String(i._id)]));
+
+    const enriched = bookings.map((b) => ({
+        ...b,
+        invoiceId: invoiceMap.get(String(b._id)) || null,
+        hasInvoice: invoiceMap.has(String(b._id)),
+    }));
+
+    return res.json(createResponse(true, 200, 'Lấy danh sách booking thành công!', enriched));
 });
 
 //* GET BY USER
@@ -1504,7 +1522,7 @@ export const getBookingsByUser = handleAsync(async (req, res, next) => {
     const userId = req.params.userId || req.user?._id;
     if (!userId) return next(createError(400, 'Thiếu userId!'));
 
-    //  Lấy list booking như cũ
+    //  Lấy list booking
     const bookings = await Booking.find({ customerId: userId })
         .populate('courtId', 'name type images image address')
         .populate('customerId', 'name username phone email')
