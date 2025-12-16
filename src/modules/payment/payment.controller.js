@@ -4,9 +4,12 @@ import {
     PAYMENT_METHOD,
     DEPOSIT_STATUS,
 } from '../../common/constants/enums.js';
+
 import crypto from 'crypto';
 import qs from 'qs';
+import mongoose from 'mongoose';
 import Booking from '../bookings/booking.models.js';
+
 import {
     VNP_URL,
     VNP_TMN_CODE,
@@ -14,6 +17,7 @@ import {
     VNP_RETURN_URL,
     FRONT_END_URL,
 } from '../../common/config/environment.js';
+
 import { commitVoucherUsage, rollbackVoucherUsage } from '../vouchers/voucher.service.js';
 
 // Tỉ lệ cọc so với TIỀN SÂN — 1 = thanh toán FULL tiền sân
@@ -30,11 +34,18 @@ function sortObject(obj) {
     return sorted;
 }
 
+function makeTxnRef() {
+    const t = Date.now().toString(); // 13 số
+    const r = crypto.randomBytes(4).toString('hex'); // 8 ký tự hex
+    return `BK${t}${r}`.slice(0, 34); // VNPay giới hạn <= 34
+}
+
+const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(String(id || ''));
+
 //  TẠO THANH TOÁN VNPAY
 export const createVnpayPayment = async (req, res, next) => {
     try {
         const { bookingId, bookingIds, amount, isRetryPayment } = req.body;
-        //console.log(' VNPay body:', { bookingId, bookingIds, amount, isRetryPayment });
 
         // Gom list id cần thanh toán
         let ids = [];
@@ -48,19 +59,36 @@ export const createVnpayPayment = async (req, res, next) => {
                 .json({ success: false, message: 'Thiếu bookingId hoặc bookingIds' });
         }
 
-        const bookings = await Booking.find({ _id: { $in: ids } });
-        // console.log(
-        //     ' Found bookings:',
-        //     bookings.map((b) => ({ id: b._id.toString(), code: b.code }))
-        // );
+        // Validate ObjectId trước khi query (tránh CastError)
+        const invalidId = ids.find((id) => !isValidObjectId(id));
+        if (invalidId) {
+            return res.status(400).json({
+                success: false,
+                message: `bookingId không hợp lệ: ${invalidId}`,
+            });
+        }
 
+        //  Lấy bookings
+        const bookings = await Booking.find({ _id: { $in: ids } });
         if (!bookings || bookings.length === 0) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy booking' });
+        }
+
+        //  Chặn thanh toán booking đã hủy / đã paid đủ
+        const invalid = bookings.find(
+            (b) => b.status === BOOKING_STATUS.CANCELLED || b.paymentStatus === PAYMENT_STATUS.PAID
+        );
+        if (invalid) {
+            return res.status(400).json({
+                success: false,
+                message: `Có ca không hợp lệ để thanh toán (đã hủy hoặc đã thanh toán đủ): ${invalid.code}`,
+            });
         }
 
         // booking “đại diện” để check autoCancel, code...
         const booking = bookings[0];
 
+        //  Check auto-cancel (chỉ áp dụng pending + unpaid)
         const now = new Date();
         if (
             booking.autoCancelAt &&
@@ -73,17 +101,7 @@ export const createVnpayPayment = async (req, res, next) => {
             booking.cancelReason = 'Hết thời gian thanh toán online (5 phút), đơn tự động hủy.';
             booking.cancelledAt = now;
 
-            try {
-                await booking.save();
-            } catch (err) {
-                if (err.name === 'ValidationError') {
-                    return res.status(400).json({
-                        success: false,
-                        message: 'Không thể cập nhật trạng thái đơn đặt sân. Dữ liệu không hợp lệ!',
-                    });
-                }
-                return next(err);
-            }
+            await booking.save();
 
             return res.status(400).json({
                 success: false,
@@ -91,13 +109,13 @@ export const createVnpayPayment = async (req, res, next) => {
             });
         }
 
-        // Tổng tiền của TẤT CẢ booking
+        //  Tổng tiền của TẤT CẢ booking
         const total = bookings.reduce((sum, b) => sum + Number(b.total || b.fieldAmount || 0), 0);
         if (!total || total <= 0) {
             return res.status(400).json({ success: false, message: 'Tổng tiền không hợp lệ!' });
         }
 
-        // Tổng tiền đã cọc của cả nhóm
+        //  Tổng tiền đã cọc của cả nhóm
         const oldDeposit = bookings.reduce(
             (sum, b) =>
                 sum + (b.depositStatus === DEPOSIT_STATUS.PAID ? Number(b.depositAmount || 0) : 0),
@@ -111,6 +129,7 @@ export const createVnpayPayment = async (req, res, next) => {
                 .json({ success: false, message: 'Đơn này đã thanh toán đủ tiền!' });
         }
 
+        //  Tính số tiền trả lần này
         let payNow = 0;
         if (isRetryPayment) {
             const clientAmount = Number(amount || 0);
@@ -127,11 +146,9 @@ export const createVnpayPayment = async (req, res, next) => {
                 .json({ success: false, message: 'Số tiền thanh toán không hợp lệ!' });
         }
 
-        //   voucher CHO TỪNG BOOKING có voucher (kể cả nhiều ca)
-        //    Nếu ca nào commit fail (hết lượt / hết hạn) thì rollback lại các ca đã commit và báo lỗi.
+        //  Commit voucher (chỉ lần đầu, không phải retry)
         if (!isRetryPayment) {
-            const committed = []; // lưu các booking đã commit để rollback nếu có lỗi
-
+            const committed = [];
             try {
                 for (const b of bookings) {
                     if (b.voucherId && b.voucherUsageStatus === 'pending' && b.customerId) {
@@ -151,18 +168,14 @@ export const createVnpayPayment = async (req, res, next) => {
                     }
                 }
             } catch (error) {
-                console.error('❌ Lỗi commit voucher cho nhóm booking:', error);
-
-                // rollback lại những booking đã commit voucher trước đó
+                // rollback các ca đã commit
                 for (const b of committed) {
                     try {
                         await rollbackVoucherUsage(b.voucherId, b.customerId, b._id);
                         b.voucherUsageStatus = 'pending';
                         b.voucherUsageId = undefined;
                         await b.save();
-                    } catch (rbErr) {
-                        console.error('⚠️ Lỗi rollback voucher khi commit fail:', rbErr);
-                    }
+                    } catch {}
                 }
 
                 const isOutOfUsage =
@@ -186,13 +199,12 @@ export const createVnpayPayment = async (req, res, next) => {
             }
         }
 
-        // GHÉP NHIỀU MÃ BOOKING THÀNH 1 CHUỖI ĐỂ HIỂN THỊ Ở “Mã đơn hàng”
+        //  Chuẩn bị VNPay params
         const bookingCodesStr = bookings
             .map((b) => b.code)
             .filter(Boolean)
             .join(',');
-
-        const orderId = bookingCodesStr || booking.code; // vnp_TxnRef hiển thị: BKxxxxx,BKyyyy
+        const txnRef = makeTxnRef(); // luôn unique
 
         const createDate = new Date()
             .toISOString()
@@ -202,15 +214,21 @@ export const createVnpayPayment = async (req, res, next) => {
         const vnpAmount = payNow * 100;
         const bookingIdsStr = ids.join(',');
 
+        //  QUAN TRỌNG: OrderInfo format chuẩn để callback parse bằng qs.parse
+        // (giá trị sẽ được encode bởi sortObject => an toàn)
+        const orderInfo = qs.stringify(
+            { BOOKING_IDS: bookingIdsStr, CODES: bookingCodesStr },
+            { encode: false }
+        );
+
         const vnp_Params = {
             vnp_Version: '2.1.0',
             vnp_Command: 'pay',
             vnp_TmnCode: VNP_TMN_CODE,
             vnp_Locale: 'vn',
             vnp_CurrCode: 'VND',
-            vnp_TxnRef: orderId,
-            // Lưu list booking để callback dùng
-            vnp_OrderInfo: `BOOKING_IDS=${bookingIdsStr}`,
+            vnp_TxnRef: txnRef,
+            vnp_OrderInfo: orderInfo,
             vnp_OrderType: 'billpayment',
             vnp_Amount: vnpAmount,
             vnp_ReturnUrl: VNP_RETURN_URL,
@@ -222,7 +240,6 @@ export const createVnpayPayment = async (req, res, next) => {
         const signData = qs.stringify(sorted, { encode: false });
         const hmac = crypto.createHmac('sha512', VNP_HASH_SECRET.trim());
         const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
-
         sorted.vnp_SecureHash = signed;
 
         const paymentUrl = `${VNP_URL}?${qs.stringify(sorted, { encode: false })}`;
@@ -256,63 +273,41 @@ export const vnpayReturn = async (req, res, next) => {
         }
 
         const rspCode = vnp_Params.vnp_ResponseCode; // '00' = OK
-        const txnRef = vnp_Params.vnp_TxnRef; // có thể là "BK1,BK2" khi nhiều booking
         const amountFromVnp = Number(vnp_Params.vnp_Amount || 0);
         const paidAmount = amountFromVnp / 100;
 
-        //  LẤY NHÓM BOOKING THEO BOOKING_IDS (DECODE)
+        //  Parse vnp_OrderInfo đúng cách
         const rawOrderInfo = vnp_Params.vnp_OrderInfo || '';
-
         let decodedOrderInfo = rawOrderInfo;
-        try {
-            // VNPay hay dùng dấu + thay cho space => đổi về space rồi decode
-            decodedOrderInfo = decodeURIComponent(rawOrderInfo.replace(/\+/g, ' '));
 
-            // nếu sau khi decode vẫn còn %3D / %2C thì decode thêm lần nữa
-            if (
-                decodedOrderInfo.includes('%3D') ||
-                decodedOrderInfo.includes('%2C') ||
-                decodedOrderInfo.includes('%3d') ||
-                decodedOrderInfo.includes('%2c')
-            ) {
+        try {
+            decodedOrderInfo = decodeURIComponent(rawOrderInfo.replace(/\+/g, ' '));
+            // nếu còn encoded sâu thì decode thêm
+            if (/%3D|%2C/i.test(decodedOrderInfo)) {
                 decodedOrderInfo = decodeURIComponent(decodedOrderInfo);
             }
         } catch (e) {
             console.error('⚠️ Lỗi decode vnp_OrderInfo:', e?.message || e);
         }
 
-        const marker = 'BOOKING_IDS=';
-        let bookingIds = [];
+        // orderInfo là dạng: "BOOKING_IDS=a,b,c&CODES=BK..."
+        const parsedInfo = qs.parse(decodedOrderInfo);
+        const idsStrRaw = parsedInfo.BOOKING_IDS || parsedInfo['BOOKING_IDS'];
 
-        const idx = decodedOrderInfo.indexOf(marker);
-        if (idx !== -1) {
-            const idsStr = decodedOrderInfo.slice(idx + marker.length);
-            bookingIds = idsStr
-                .split(',')
-                .map((s) => s.trim())
-                .filter(Boolean);
+        const bookingIds = String(idsStrRaw || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+
+        // Validate IDs để tránh cast fail
+        const validIds = bookingIds.filter(isValidObjectId);
+        if (!validIds.length || validIds.length !== bookingIds.length) {
+            return res.redirect(`${FRONT_END_URL}/payment-return?status=notfound`);
         }
 
-        let bookings = [];
-
-        if (bookingIds.length > 0) {
-            bookings = await Booking.find({ _id: { $in: bookingIds } });
-            if (!bookings || bookings.length === 0) {
-                return res.redirect(`${FRONT_END_URL}/payment-return?status=notfound`);
-            }
-        } else {
-            // Fallback: luồng cũ – 1 booking
-            // Nếu vnp_TxnRef là "BK1,BK2" thì lấy BK1
-            let codeToFind = txnRef;
-            if (txnRef && txnRef.includes(',')) {
-                codeToFind = txnRef.split(',')[0].trim();
-            }
-
-            const booking = await Booking.findOne({ code: codeToFind });
-            if (!booking) {
-                return res.redirect(`${FRONT_END_URL}/payment-return?status=notfound`);
-            }
-            bookings = [booking];
+        const bookings = await Booking.find({ _id: { $in: validIds } });
+        if (!bookings || bookings.length === 0) {
+            return res.redirect(`${FRONT_END_URL}/payment-return?status=notfound`);
         }
 
         let voucherStatus = 'none';
@@ -321,10 +316,9 @@ export const vnpayReturn = async (req, res, next) => {
         //  THANH TOÁN THÀNH CÔNG
         if (rspCode === '00' && paidAmount > 0) {
             if (bookings.length > 1) {
-                //  NHIỀU BOOKING: chia số tiền thực tế cho từng booking
                 let remaining = paidAmount;
 
-                const sortedBookings = bookings.sort(
+                const sortedBookings = [...bookings].sort(
                     (a, b) =>
                         new Date(a.date || a.createdAt).getTime() -
                         new Date(b.date || b.createdAt).getTime()
@@ -347,23 +341,16 @@ export const vnpayReturn = async (req, res, next) => {
 
                     b.depositAmount = newDeposit;
                     b.depositMethod = PAYMENT_METHOD.VNPAY;
-                    if (newDeposit > 0) {
-                        b.depositStatus = DEPOSIT_STATUS.PAID;
-                    }
+                    if (newDeposit > 0) b.depositStatus = DEPOSIT_STATUS.PAID;
 
-                    if (newDeposit >= total) {
-                        b.paymentStatus = PAYMENT_STATUS.PAID;
-                    } else if (newDeposit > 0) {
-                        b.paymentStatus = PAYMENT_STATUS.PARTIAL;
-                    } else {
-                        b.paymentStatus = PAYMENT_STATUS.UNPAID;
-                    }
+                    if (newDeposit >= total) b.paymentStatus = PAYMENT_STATUS.PAID;
+                    else if (newDeposit > 0) b.paymentStatus = PAYMENT_STATUS.PARTIAL;
+                    else b.paymentStatus = PAYMENT_STATUS.UNPAID;
 
                     await b.save();
                     remaining -= add;
                 }
             } else {
-                //   BOOKING
                 const booking = bookings[0];
                 const oldDeposit = Number(booking.depositAmount || 0);
                 const newDeposit = oldDeposit + paidAmount;
@@ -373,22 +360,16 @@ export const vnpayReturn = async (req, res, next) => {
                 booking.depositStatus = DEPOSIT_STATUS.PAID;
 
                 const total = Number(booking.total || booking.fieldAmount || 0);
-                if (total > 0 && newDeposit >= total) {
-                    booking.paymentStatus = PAYMENT_STATUS.PAID;
-                } else if (newDeposit > 0) {
-                    booking.paymentStatus = PAYMENT_STATUS.PARTIAL;
-                } else {
-                    booking.paymentStatus = PAYMENT_STATUS.UNPAID;
-                }
+                if (total > 0 && newDeposit >= total) booking.paymentStatus = PAYMENT_STATUS.PAID;
+                else if (newDeposit > 0) booking.paymentStatus = PAYMENT_STATUS.PARTIAL;
+                else booking.paymentStatus = PAYMENT_STATUS.UNPAID;
 
-                if (booking.voucherUsageStatus === 'applied') {
-                    voucherStatus = 'applied';
-                }
+                if (booking.voucherUsageStatus === 'applied') voucherStatus = 'applied';
 
                 await booking.save();
             }
         } else {
-            //  THANH TOÁN THẤT BẠI – rollback voucher cho TẤT CẢ booking đã applied
+            //  THANH TOÁN THẤT BẠI – rollback voucher
             for (const booking of bookings) {
                 if (
                     booking.voucherId &&
@@ -405,9 +386,6 @@ export const vnpayReturn = async (req, res, next) => {
                         booking.voucherUsageStatus = 'restored';
                         booking.voucherRestoredAt = new Date();
                         await booking.save();
-                        // console.log(
-                        //     ` Đã rollback voucher cho booking ${booking.code} do thanh toán thất bại`
-                        // );
                     } catch (error) {
                         console.error('❌ Lỗi khi rollback voucher:', error.message);
                     }
@@ -425,10 +403,7 @@ export const vnpayReturn = async (req, res, next) => {
             });
         }
 
-        const queryParams = {
-            ...req.query,
-            status: rspCode,
-        };
+        const queryParams = { ...req.query, status: rspCode };
 
         if (voucherStatus === 'expired') {
             queryParams.voucherStatus = 'expired';
