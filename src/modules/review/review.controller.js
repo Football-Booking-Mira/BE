@@ -79,6 +79,43 @@ export const adminGetReviews = handleAsync(async (req, res, next) => {
     );
 });
 
+export const getReviewsByCourt = handleAsync(async (req, res, next) => {
+    const { courtId } = req.params;
+    const { page = 1, limit = 10 } = req.query;
+
+    if (!courtId) {
+        return next(createError(400, "Thiếu courtId"));
+    }
+
+    const query = {
+        courtId,
+        status: "active",
+    };
+
+    const reviews = await Review.find(query)
+        .populate("userId", "name avatar")
+        .populate("bookingId", "date startTime endTime")
+        .sort({ createdAt: -1 })
+        .skip((Number(page) - 1) * Number(limit))
+        .limit(Number(limit))
+        .lean();
+
+    const total = await Review.countDocuments(query);
+
+    return res.json(
+        createResponse(true, 200, "Danh sách đánh giá của sân", {
+            reviews,
+            pagination: {
+                page: Number(page),
+                limit: Number(limit),
+                total,
+                totalPages: Math.ceil(total / Number(limit)),
+            },
+        })
+    );
+});
+
+
 export const updateReview = handleAsync(async (req, res, next) => {
     const reviewId = req.params.id;
     const { rating, comment } = req.body;

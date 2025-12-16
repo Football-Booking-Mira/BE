@@ -10,6 +10,7 @@ import {
     deleteReview,
     getFieldsNeedReview,
     getReviewDetail,
+    getReviewsByCourt,
 } from "./review.controller.js";
 // 
 routerReview.get("/need-review/:id", 
@@ -29,6 +30,8 @@ routerReview.get(
     authenticate,
     getReviewDetail
 );
+routerReview.get("/court-pulic/:courtId", getReviewsByCourt);
+
 // 
 export default 
 routerReview;
