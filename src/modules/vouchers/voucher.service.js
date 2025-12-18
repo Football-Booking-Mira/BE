@@ -4,6 +4,27 @@ import createError from '../../utils/error.js';
 import Voucher from './voucher.models.js';
 import VoucherUsage from './voucherUsage.models.js';
 
+/**
+ * ===============================
+ * COMPUTE VOUCHER STATUS (SYNC FE)
+ * ===============================
+ * upcoming  : chưa tới thời gian
+ * expired   : đã hết hạn
+ * active    : trong thời gian + admin bật
+ * inactive  : trong thời gian + admin tắt
+ */
+export const computeVoucherStatus = (voucher) => {
+    const now = new Date();
+
+    const start = new Date(voucher.startDate);
+    const end = new Date(voucher.endDate);
+
+    if (now < start) return 'upcoming';
+    if (now > end) return 'expired';
+
+    return voucher.status === VOUCHER_STATUS.ACTIVE ? 'active' : 'inactive';
+};
+
 const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
 
 export const normalizeVoucherCode = (code = '') => code.trim().toUpperCase();
@@ -118,8 +139,7 @@ export const validateVoucherForOrder = async ({
         throw createError(404, 'Voucher không tồn tại hoặc đã bị vô hiệu!');
     }
 
-    // FE gửi kèm giá trị giảm mà khách đã thấy trước đó,
-    // nếu admin chỉnh sửa voucher sau đó thì báo cho khách biết.
+    // FE gửi kèm giá trị giảm mà khách đã thấy trước đó
     if (
         typeof expectedDiscountValue === 'number' &&
         expectedDiscountValue !== voucher.discountValue
@@ -136,7 +156,7 @@ export const validateVoucherForOrder = async ({
     const now = new Date();
     const compareDate = bookingDate ? new Date(bookingDate) : now;
 
-    // So sánh theo NGÀY (bỏ qua giờ)
+    // So sánh theo NGÀY
     const normalizedCompare = new Date(compareDate);
     const normalizedStart = new Date(voucher.startDate);
     const normalizedEnd = new Date(voucher.endDate);
@@ -163,9 +183,7 @@ export const validateVoucherForOrder = async ({
     // Check theo sân / loại sân
     ensureCourtMatches(voucher, courtId, courtType);
 
-    //  hỗ trợ đơn nhiều ca (kể cả cách giờ)
-    // Nếu không truyền startTime nhưng có mảng slots,
-    // lấy giờ bắt đầu NHỎ NHẤT trong các ca để check timeRestrictions.
+    // Hỗ trợ đơn nhiều ca
     let effectiveStartTime = startTime;
     if (!effectiveStartTime && Array.isArray(slots) && slots.length > 0) {
         const sorted = [...slots].sort((a, b) =>
@@ -174,8 +192,6 @@ export const validateVoucherForOrder = async ({
         effectiveStartTime = sorted[0].startTime;
     }
     ensureTimeMatches(voucher, effectiveStartTime);
-    //  Không còn bất kỳ check “1 block giờ liên tục” nào nữa.
-    // Đơn nhiều ca, cách giờ vẫn áp dụng voucher bình thường.
 
     // Giới hạn số lần dùng / user
     const userUsageCount = await VoucherUsage.countDocuments({
@@ -184,7 +200,6 @@ export const validateVoucherForOrder = async ({
         status: 'applied',
     });
 
-    // perUserLimit <=0 hoặc không set => coi như không giới hạn
     const perUserLimit =
         typeof voucher.perUserLimit === 'number' && voucher.perUserLimit > 0
             ? voucher.perUserLimit
@@ -215,9 +230,7 @@ export const commitVoucherUsage = async ({
 }) => {
     const updated = await Voucher.findOneAndUpdate(
         { _id: voucherId, remainingQuantity: { $gte: 1 } },
-        {
-            $inc: { remainingQuantity: -1, usageCount: 1 },
-        },
+        { $inc: { remainingQuantity: -1, usageCount: 1 } },
         { new: true }
     );
 
@@ -231,6 +244,7 @@ export const commitVoucherUsage = async ({
         bookingId,
         discountAmount,
         orderTotal,
+        status: 'applied',
     });
 
     return usage;
@@ -255,8 +269,7 @@ export const restoreVoucherUsage = async (booking) => {
 };
 
 /**
- * Rollback voucher usage - Hủy việc sử dụng voucher
- * Dùng khi cần rollback voucher đã commit
+ * Rollback voucher usage
  */
 export const rollbackVoucherUsage = async (voucherId, userId, bookingId) => {
     if (!voucherId || !userId || !bookingId) {
@@ -270,16 +283,12 @@ export const rollbackVoucherUsage = async (voucherId, userId, bookingId) => {
         status: 'applied',
     });
 
-    if (!usage) {
-        return null; // Không tìm thấy usage để rollback
-    }
+    if (!usage) return null;
 
-    // Cập nhật status thành restored
     usage.status = 'restored';
     usage.restoredAt = new Date();
     await usage.save();
 
-    // Tăng lại remainingQuantity và giảm usageCount
     await Voucher.findByIdAndUpdate(voucherId, {
         $inc: { remainingQuantity: 1, usageCount: -1 },
     });
@@ -337,12 +346,7 @@ export const getVoucherStatsData = async (voucherId) => {
                 as: 'user',
             },
         },
-        {
-            $unwind: {
-                path: '$user',
-                preserveNullAndEmptyArrays: true,
-            },
-        },
+        { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
         {
             $project: {
                 _id: 1,

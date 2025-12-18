@@ -13,6 +13,7 @@ import {
   getVoucherStatsData,
   normalizeVoucherCode,
   validateVoucherForOrder,
+  computeVoucherStatus,
 } from "./voucher.service.js";
 
 const ensureValidCourts = (courtIds = []) => {
@@ -32,27 +33,23 @@ export const getVouchers = handleAsync(async (req, res) => {
   const { q, status, limit = 50 } = req.query;
 
   const filters = { isDeleted: { $ne: true } };
-  if (typeof q === "string" && q.trim()) {
-    filters.code = { $regex: q.trim(), $options: "i" };
-  }
-  if (typeof status === "string" && status.trim()) {
-    filters.status = status.trim();
-  }
-
-  const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+  if (q) filters.code = { $regex: q.trim(), $options: 'i' };
 
   const vouchers = await Voucher.find(filters)
     .sort({ createdAt: -1 })
-    .limit(safeLimit)
-    .select(
-      "code status discountType discountValue maxDiscountValue totalIssued remainingQuantity usageCount startDate endDate createdAt"
-    )
+    .limit(Number(limit))
     .lean();
 
+  const mapped = vouchers.map((v) => ({
+    ...v,
+    status: computeVoucherStatus(v), // 🔥 FIX CHÍNH Ở ĐÂY
+  }));
+
   return res.json(
-    createResponse(true, 200, "Lấy danh sách voucher thành công!", vouchers)
+    createResponse(true, 200, 'Lấy danh sách voucher thành công!', mapped)
   );
 });
+
 
 // API Public - Lấy danh sách voucher ACTIVE cho user xem
 export const getPublicVouchers = handleAsync(async (req, res) => {
