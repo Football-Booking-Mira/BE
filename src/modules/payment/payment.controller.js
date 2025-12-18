@@ -12,6 +12,7 @@ import mongoose from 'mongoose';
 import Booking from '../bookings/booking.models.js';
 import BookingItem from '../bookingItems/bookingItem.models.js';
 import Equipment from '../equipments/equipment.models.js';
+import InvoiceModel from '../invoices/invoice.models.js';
 
 import {
     VNP_URL,
@@ -33,7 +34,8 @@ function sortObject(obj) {
         .map((k) => encodeURIComponent(k))
         .sort();
     for (const key of keys) {
-        sorted[key] = encodeURIComponent(obj[key]).replace(/%20/g, '+');
+        const val = obj[key] ?? '';
+        sorted[key] = encodeURIComponent(val).replace(/%20/g, '+');
     }
     return sorted;
 }
@@ -60,7 +62,7 @@ const safeNum = (v) => {
     return Number.isFinite(n) ? n : 0;
 };
 
-//  trả kho + xoá bookingItems (dùng khi cancel/fail)
+//  trả kho + xoá bookingItems (dùng khi cancel/fail hệ thống)
 const restoreEquipAndDeleteItems = async (bookingId) => {
     const items = await BookingItem.find({ bookingId: String(bookingId) })
         .lean()
@@ -144,8 +146,7 @@ const calcBookingTotal = (b, equipmentMap) => {
     const eqAgg = equipmentMap?.get(String(b._id)) || 0;
     const eqStored = safeNum(b.equipmentTotal);
 
-    //  nếu schema bookingItem bookingId mismatch trước đây => eqAgg có thể 0
-    // lấy cái lớn hơn
+    // lấy cái lớn hơn để tránh lệch do mismatch kiểu bookingId trước đây
     const eqTotal = Math.max(eqAgg, eqStored);
 
     return Math.max(0, field + eqTotal - discount);
@@ -153,6 +154,11 @@ const calcBookingTotal = (b, equipmentMap) => {
 
 const calcPaidDeposit = (b) =>
     b.depositStatus === DEPOSIT_STATUS.PAID ? safeNum(b.depositAmount) : 0;
+
+const isOnlineMethod = (m) => {
+    const method = String(m || '').toLowerCase();
+    return [PAYMENT_METHOD.VNPAY, PAYMENT_METHOD.MOMO].includes(method);
+};
 
 //  TẠO THANH TOÁN VNPAY
 export const createVnpayPayment = async (req, res, next) => {
@@ -183,9 +189,30 @@ export const createVnpayPayment = async (req, res, next) => {
             return res.status(404).json({ success: false, message: 'Không tìm thấy booking' });
         }
 
+        //  CHẶN: đơn đã có hóa đơn => coi như đã thanh toán/chốt, không cho tạo link thanh toán lại
+        const invCount = await InvoiceModel.countDocuments({ bookingId: { $in: ids } });
+        if (invCount > 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Đơn đã có hoá đơn, không thể thanh toán lại',
+            });
+        }
+
+        //  chặn đơn không phải online
+        const notOnline = bookings.find((b) => !isOnlineMethod(b.paymentMethod));
+        if (notOnline) {
+            return res.status(400).json({
+                success: false,
+                message: `Có ca không hỗ trợ thanh toán online: ${notOnline.code}`,
+            });
+        }
+
         // chặn đơn đã hủy / đã PAID đủ
         const invalid = bookings.find(
-            (b) => b.status === BOOKING_STATUS.CANCELLED || b.paymentStatus === PAYMENT_STATUS.PAID
+            (b) =>
+                b.status === BOOKING_STATUS.CANCELLED ||
+                b.paymentStatus === PAYMENT_STATUS.PAID ||
+                b.paymentStatus === PAYMENT_STATUS.REFUNDED
         );
         if (invalid) {
             return res.status(400).json({
@@ -220,10 +247,10 @@ export const createVnpayPayment = async (req, res, next) => {
             });
         }
 
-        // tính equipmentTotal đúng (support bookingId string/ObjectId)
+        //  tính equipmentTotal đúng (support bookingId string/ObjectId)
         const equipmentMap = await buildEquipmentMap(bookings.map((b) => b._id));
 
-        // sync lại booking.equipmentTotal + booking.total (optional nhưng nên)
+        //  sync lại booking.equipmentTotal + booking.total
         for (const b of bookings) {
             const newTotal = calcBookingTotal(b, equipmentMap);
 
@@ -242,7 +269,6 @@ export const createVnpayPayment = async (req, res, next) => {
         }
 
         const total = bookings.reduce((sum, b) => sum + calcBookingTotal(b, equipmentMap), 0);
-
         const oldDeposit = bookings.reduce((sum, b) => sum + calcPaidDeposit(b), 0);
 
         const remaining = Math.max(0, total - oldDeposit);
@@ -269,7 +295,7 @@ export const createVnpayPayment = async (req, res, next) => {
                 .json({ success: false, message: 'Số tiền thanh toán không hợp lệ!' });
         }
 
-        // Commit voucher (chỉ lần đầu, không retry)
+        //  Commit voucher (chỉ lần đầu, không retry)
         if (!isRetry) {
             const committed = [];
             try {
@@ -279,8 +305,9 @@ export const createVnpayPayment = async (req, res, next) => {
                             voucherId: b.voucherId,
                             bookingId: b._id,
                             userId: b.customerId,
+                            // discountAmount
                             discountAmount: b.voucherDiscount || 0,
-                            // orderTotal nên là fieldAmount (rule voucher thường tính trên tiền sân)
+                            // orderTotal: thường voucher tính trên tiền sân
                             orderTotal: b.fieldAmount || 0,
                         });
 
@@ -361,7 +388,7 @@ export const createVnpayPayment = async (req, res, next) => {
 
         const sorted = sortObject(vnp_Params);
         const signData = qs.stringify(sorted, { encode: false });
-        const hmac = crypto.createHmac('sha512', VNP_HASH_SECRET.trim());
+        const hmac = crypto.createHmac('sha512', String(VNP_HASH_SECRET || '').trim());
         const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
         sorted.vnp_SecureHash = signed;
 
@@ -388,10 +415,10 @@ export const vnpayReturn = async (req, res, next) => {
         vnp_Params = sortObject(vnp_Params);
 
         const signData = qs.stringify(vnp_Params, { encode: false });
-        const hmac = crypto.createHmac('sha512', VNP_HASH_SECRET.trim());
+        const hmac = crypto.createHmac('sha512', String(VNP_HASH_SECRET || '').trim());
         const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
 
-        if (secureHash !== signed) {
+        if (String(secureHash || '').toLowerCase() !== String(signed || '').toLowerCase()) {
             return res.redirect(`${FRONT_END_URL}/payment-return?status=invalid`);
         }
 
@@ -407,7 +434,7 @@ export const vnpayReturn = async (req, res, next) => {
             if (/%3D|%2C/i.test(decodedOrderInfo))
                 decodedOrderInfo = decodeURIComponent(decodedOrderInfo);
         } catch (e) {
-            console.error(' Lỗi decode vnp_OrderInfo:', e?.message || e);
+            console.error('❌ Lỗi decode vnp_OrderInfo:', e?.message || e);
         }
 
         const parsedInfo = qs.parse(decodedOrderInfo);
@@ -427,8 +454,27 @@ export const vnpayReturn = async (req, res, next) => {
         if (!bookings || bookings.length === 0) {
             return res.redirect(`${FRONT_END_URL}/payment-return?status=notfound`);
         }
+
+        //  nếu đã có invoice thì KHÔNG update deposit nữa (tránh cộng lố)
+        const invCount = await InvoiceModel.countDocuments({ bookingId: { $in: validIds } });
+
+        //  tính total chuẩn theo DB item (để PAID/need đúng)
+        const equipmentMap = await buildEquipmentMap(bookings.map((b) => b._id));
+        for (const b of bookings) {
+            const newTotal = calcBookingTotal(b, equipmentMap);
+            const eqAgg = equipmentMap.get(String(b._id)) || 0;
+            const eqStored = safeNum(b.equipmentTotal);
+            const eqTotal = Math.max(eqAgg, eqStored);
+
+            if (safeNum(b.equipmentTotal) !== eqTotal || safeNum(b.total) !== newTotal) {
+                b.equipmentTotal = eqTotal;
+                b.total = newTotal;
+                await b.save().catch(() => {});
+            }
+        }
+
         //  SUCCESS
-        if (rspCode === '00' && paidAmount > 0) {
+        if (rspCode === '00' && paidAmount > 0 && invCount === 0) {
             if (bookings.length > 1) {
                 let remaining = paidAmount;
 
@@ -441,14 +487,23 @@ export const vnpayReturn = async (req, res, next) => {
                 for (const b of sortedBookings) {
                     if (remaining <= 0) break;
 
-                    const total = Number(b.total || b.fieldAmount || 0);
+                    const total =
+                        safeNum(b.total) > 0 ? safeNum(b.total) : calcBookingTotal(b, equipmentMap);
                     if (!total) continue;
 
                     const currentDeposit =
-                        b.depositStatus === DEPOSIT_STATUS.PAID ? Number(b.depositAmount || 0) : 0;
+                        b.depositStatus === DEPOSIT_STATUS.PAID ? safeNum(b.depositAmount) : 0;
 
                     const need = Math.max(0, total - currentDeposit);
-                    if (need <= 0) continue;
+                    if (need <= 0) {
+                        // idempotent: đã đủ rồi thì skip
+                        b.paymentStatus = PAYMENT_STATUS.PAID;
+                        b.depositStatus = DEPOSIT_STATUS.PAID;
+                        b.depositMethod = PAYMENT_METHOD.VNPAY;
+                        b.autoCancelAt = null;
+                        await b.save().catch(() => {});
+                        continue;
+                    }
 
                     const add = Math.min(need, remaining);
                     const newDeposit = currentDeposit + add;
@@ -461,6 +516,10 @@ export const vnpayReturn = async (req, res, next) => {
                     else if (newDeposit > 0) b.paymentStatus = PAYMENT_STATUS.PARTIAL;
                     else b.paymentStatus = PAYMENT_STATUS.UNPAID;
 
+                    //  clear autoCancelAt khi có tiền về
+                    b.autoCancelAt = null;
+
+                    // nếu trước đây bị CANCELLED vì vnpay fail/cancel thì gỡ ra
                     if (
                         b.status === BOOKING_STATUS.CANCELLED &&
                         String(b.cancelReason || '')
@@ -473,23 +532,38 @@ export const vnpayReturn = async (req, res, next) => {
                         b.cancelledAt = undefined;
                     }
 
-                    await b.save();
+                    await b.save().catch(() => {});
                     remaining -= add;
                 }
             } else {
                 const booking = bookings[0];
 
-                const oldDeposit = Number(booking.depositAmount || 0);
-                const newDeposit = oldDeposit + paidAmount;
+                const total =
+                    safeNum(booking.total) > 0
+                        ? safeNum(booking.total)
+                        : calcBookingTotal(booking, equipmentMap);
+
+                const currentDeposit =
+                    booking.depositStatus === DEPOSIT_STATUS.PAID
+                        ? safeNum(booking.depositAmount)
+                        : 0;
+
+                const need = Math.max(0, total - currentDeposit);
+                const add = Math.min(need, paidAmount);
+
+                const newDeposit = currentDeposit + add;
 
                 booking.depositAmount = newDeposit;
                 booking.depositMethod = PAYMENT_METHOD.VNPAY;
-                booking.depositStatus = DEPOSIT_STATUS.PAID;
+                booking.depositStatus =
+                    newDeposit > 0 ? DEPOSIT_STATUS.PAID : DEPOSIT_STATUS.PENDING;
 
-                const total = Number(booking.total || booking.fieldAmount || 0);
                 if (total > 0 && newDeposit >= total) booking.paymentStatus = PAYMENT_STATUS.PAID;
                 else if (newDeposit > 0) booking.paymentStatus = PAYMENT_STATUS.PARTIAL;
                 else booking.paymentStatus = PAYMENT_STATUS.UNPAID;
+
+                //  clear autoCancelAt khi có tiền về
+                booking.autoCancelAt = null;
 
                 if (
                     booking.status === BOOKING_STATUS.CANCELLED &&
@@ -503,9 +577,9 @@ export const vnpayReturn = async (req, res, next) => {
                     booking.cancelledAt = undefined;
                 }
 
-                await booking.save();
+                await booking.save().catch(() => {});
             }
-        } else {
+        } else if (rspCode !== '00') {
             //  FAIL / CANCEL
             // QUAN TRỌNG: KHÔNG HỦY BOOKING khi user cancel hoặc fail.
             // Chỉ rollback voucher + giữ đơn ở PENDING để "Thanh toán lại".
@@ -542,19 +616,19 @@ export const vnpayReturn = async (req, res, next) => {
                 }
 
                 // giữ trạng thái thanh toán đúng
-                const dep = Number(b.depositAmount || 0);
+                const dep = safeNum(b.depositAmount);
                 if (dep > 0) b.paymentStatus = PAYMENT_STATUS.PARTIAL;
                 else b.paymentStatus = PAYMENT_STATUS.UNPAID;
 
-                // (optional) lưu trace fail vào note/cancelReason riêng
-                b.paymentFailReason = `VNPay fail/cancel. ResponseCode=${rspCode}`; // nếu schema có field này
-                b.paymentFailAt = new Date(); // nếu schema có field này
+                // optional trace (nếu schema có)
+                b.paymentFailReason = `VNPay fail/cancel. ResponseCode=${rspCode}`;
+                b.paymentFailAt = new Date();
 
                 await b.save().catch(() => {});
             }
         }
 
-        // Bắn socket cho FE
+        //  Bắn socket cho FE
         const io = req.app.get('io');
         io?.emit('booking_global_updated');
 
