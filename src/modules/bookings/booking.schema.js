@@ -1,26 +1,54 @@
 import z from 'zod';
 import { PAYMENT_METHOD } from '../../common/constants/enums.js';
 
-// Dùng chung cho các field giờ
 const timeStringSchema = z
     .string()
     .regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Định dạng giờ phải là HH:mm');
+
+const equipmentBySlotSchema = z.record(
+    z.string(),
+    z.array(
+        z.object({
+            equipmentId: z.string(),
+            mode: z.enum(['rent', 'sell']),
+            qty: z.coerce.number().int().positive(), // ✅ ăn cả "2"
+            // nếu FE có gửi price thì mở thêm:
+            // price: z.coerce.number().nonnegative().optional(),
+        })
+    )
+);
+
+// nhận object hoặc JSON string
+const equipmentBySlotInput = z
+    .union([equipmentBySlotSchema, z.string()])
+    .optional()
+    .transform((val, ctx) => {
+        if (typeof val !== 'string') return val;
+        try {
+            const parsed = JSON.parse(val);
+            return equipmentBySlotSchema.parse(parsed);
+        } catch {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: 'equipmentBySlot JSON không hợp lệ',
+            });
+            return z.NEVER;
+        }
+    });
 
 export const bookingSchema = z
     .object({
         courtId: z.string().min(1, 'Vui lòng chọn sân!'),
         customerId: z.string().optional(),
+
         date: z.string().refine((val) => !isNaN(Date.parse(val)), {
             message: 'Ngày đặt không hợp lệ!',
         }),
 
-        // Giờ bắt đầu / kết thúc tổng (overall) – dùng cho flow cũ
-        startTime: timeStringSchema,
-        endTime: timeStringSchema,
+        //  giờ tổng: optional (nếu dùng slots)
+        startTime: timeStringSchema.optional(),
+        endTime: timeStringSchema.optional(),
 
-        //  Danh sách các khung giờ chi tiết FE gửi lên
-        // Nếu có slots thì BE sẽ tính tiền theo từng slot,
-        // và bỏ qua check endTime > startTime ở dưới.
         slots: z
             .array(
                 z.object({
@@ -32,19 +60,22 @@ export const bookingSchema = z
             .optional(),
 
         paymentMethod: z.enum(
-            [PAYMENT_METHOD.VNPAY, PAYMENT_METHOD.CASH, PAYMENT_METHOD.TRANSFER],
-            {
-                required_error: 'Vui lòng chọn phương thức thanh toán!',
-            }
+            [
+                PAYMENT_METHOD.VNPAY,
+                PAYMENT_METHOD.MOMO,
+                PAYMENT_METHOD.CASH,
+                PAYMENT_METHOD.TRANSFER,
+            ],
+            { required_error: 'Vui lòng chọn phương thức thanh toán!' }
         ),
 
-        //* Đơn tạo tại quầy admin sẽ gửi isOffline
         isOffline: z.union([z.boolean(), z.literal('true'), z.literal('false')]).optional(),
-
-        // Đánh dấu đã thu tiền lúc tạo đơn (dùng cho cọc / trả full)
         paidAtCreation: z.union([z.boolean(), z.literal('true'), z.literal('false')]).optional(),
 
         note: z.string().max(500).optional(),
+
+        equipmentTotal: z.coerce.number().nonnegative().optional(),
+        equipmentBySlot: equipmentBySlotInput,
 
         customerInfo: z
             .object({
@@ -55,7 +86,7 @@ export const bookingSchema = z
                     .regex(/^\d{10}$/, 'Số điện thoại phải gồm đúng 10 chữ số!'),
                 email: z.string().trim().email('Email không hợp lệ!'),
             })
-            .optional(), // để admin tạo offline không bắt buộc gửi
+            .optional(),
 
         voucherCode: z
             .string()
@@ -66,25 +97,40 @@ export const bookingSchema = z
             .optional(),
     })
     .superRefine((data, ctx) => {
-        // Nếu có slots thì bỏ qua check này,
-        // vì startTime/endTime chỉ là khoảng tổng, không phải 1 ca duy nhất
-        if (data.slots && data.slots.length > 0) return;
+        // nếu KHÔNG có slots => bắt buộc startTime/endTime và validate
+        if (!data.slots || data.slots.length === 0) {
+            if (!data.startTime) {
+                ctx.addIssue({
+                    path: ['startTime'],
+                    code: z.ZodIssueCode.custom,
+                    message: 'Thiếu giờ bắt đầu!',
+                });
+                return;
+            }
+            if (!data.endTime) {
+                ctx.addIssue({
+                    path: ['endTime'],
+                    code: z.ZodIssueCode.custom,
+                    message: 'Thiếu giờ kết thúc!',
+                });
+                return;
+            }
 
-        const [sh, sm] = data.startTime.split(':').map(Number);
-        const [eh, em] = data.endTime.split(':').map(Number);
-        const start = sh * 60 + sm;
-        const end = eh * 60 + em;
+            const [sh, sm] = data.startTime.split(':').map(Number);
+            const [eh, em] = data.endTime.split(':').map(Number);
+            const start = sh * 60 + sm;
+            const end = eh * 60 + em;
 
-        if (end <= start) {
-            ctx.addIssue({
-                path: ['endTime'],
-                message: 'Giờ kết thúc phải sau giờ bắt đầu!',
-                code: z.ZodIssueCode.custom,
-            });
+            if (end <= start) {
+                ctx.addIssue({
+                    path: ['endTime'],
+                    message: 'Giờ kết thúc phải sau giờ bắt đầu!',
+                    code: z.ZodIssueCode.custom,
+                });
+            }
         }
     });
 
-// Đặt nhiều booking cùng lúc (nếu bạn đang dùng)
 export const multiBookingSchema = z.object({
     bookings: z.array(bookingSchema).min(1, 'Vui lòng chọn ít nhất 1 khung giờ!'),
 });
