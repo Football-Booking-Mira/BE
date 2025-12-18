@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import {
     BOOKING_STATUS,
     PAYMENT_STATUS,
@@ -27,6 +28,97 @@ const toMinutes = (t) => {
 };
 
 const overlap = (a1, a2, b1, b2) => Math.max(0, Math.min(a2, b2) - Math.max(a1, b1));
+
+const getStockFieldName = (eq) =>
+    typeof eq.availableQuantity === 'number'
+        ? 'availableQuantity'
+        : typeof eq.stockLeft === 'number'
+          ? 'stockLeft'
+          : typeof eq.stock === 'number'
+            ? 'stock'
+            : 'totalQuantity';
+
+const slotKey = (s, e) => canonicalSlotKey(s, e);
+
+const collectEquipmentItemsForSlots = (slotsInBooking = [], equipmentBySlot = {}) => {
+    const normalizedMap = normalizeEquipmentBySlotMap(equipmentBySlot);
+
+    const collected = [];
+    for (const s of slotsInBooking) {
+        const k = slotKey(s.startTime, s.endTime); // canonical
+        const arr = Array.isArray(normalizedMap[k]) ? normalizedMap[k] : [];
+        collected.push(...arr);
+    }
+    return mergeItems(collected);
+};
+const normalizeTime = (t) =>
+    String(t || '')
+        .trim()
+        .padStart(5, '0'); // "6:00" -> "06:00"
+const canonicalSlotKey = (start, end) => `${normalizeTime(start)}-${normalizeTime(end)}`;
+
+const normalizeEquipmentBySlotMap = (equipmentBySlot = {}) => {
+    const out = {};
+    if (!equipmentBySlot || typeof equipmentBySlot !== 'object') return out;
+
+    for (const [rawKey, rawArr] of Object.entries(equipmentBySlot)) {
+        const keyStr = String(rawKey || '');
+
+        // bắt các dạng: "14:45-15:45" hoặc "14:45 - 15:45"
+        const m = keyStr.match(/(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})/);
+        const k = m ? canonicalSlotKey(m[1], m[2]) : keyStr.replace(/\s+/g, '');
+
+        const arr = Array.isArray(rawArr) ? rawArr : [];
+        if (!out[k]) out[k] = [];
+        out[k].push(...arr);
+    }
+    return out;
+};
+
+const toNum = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+};
+
+const pickEquipmentId = (it) => {
+    if (!it) return null;
+
+    // chuẩn: equipmentId
+    if (typeof it.equipmentId === 'string') return it.equipmentId;
+
+    // đôi khi FE gửi equipmentId: { _id: "..." }
+    if (it.equipmentId && typeof it.equipmentId === 'object') {
+        return it.equipmentId._id || it.equipmentId.id || null;
+    }
+
+    // fallback: id / _id
+    return it._id || it.id || null;
+};
+
+const mergeItems = (items = []) => {
+    const map = new Map(); // key = equipmentId|mode
+
+    for (const raw of items) {
+        const equipmentId = pickEquipmentId(raw);
+        if (!equipmentId) continue;
+
+        const qty = toNum(raw.qty);
+        if (qty <= 0) continue;
+
+        const mode = raw.mode === 'sell' ? 'sell' : 'rent';
+        const price = toNum(raw.price); // string
+
+        const key = `${String(equipmentId)}|${mode}`;
+        const prev = map.get(key) || { equipmentId, mode, qty: 0, price: 0 };
+
+        prev.qty += qty;
+        if (price > 0) prev.price = price;
+
+        map.set(key, prev);
+    }
+
+    return Array.from(map.values());
+};
 
 // Xác định 1 booking có thực sự "giữ sân" hay không
 const isBlockingBooking = (b) => {
@@ -162,6 +254,20 @@ const groupSlotsByContinuous = (slots = []) => {
     }
     groups.push(current);
     return groups;
+};
+const calcPaidAmountFromDeposit = (b) =>
+    b.depositStatus === DEPOSIT_STATUS.PAID ? Number(b.depositAmount || 0) : 0;
+
+const recalcPaymentStatusByDeposit = (b) => {
+    // giữ nguyên refunded
+    if (b.paymentStatus === PAYMENT_STATUS.REFUNDED) return;
+
+    const total = Number(b.total || 0);
+    const paid = calcPaidAmountFromDeposit(b);
+
+    if (paid >= total && total > 0) b.paymentStatus = PAYMENT_STATUS.PAID;
+    else if (paid > 0) b.paymentStatus = PAYMENT_STATUS.PARTIAL;
+    else b.paymentStatus = PAYMENT_STATUS.UNPAID;
 };
 
 /*
@@ -346,6 +452,9 @@ export const calculateBookingPrice = handleAsync(async (req, res, next) => {
 /**
  * TẠO BOOKING (có hỗ trợ nhiều block slot + order gộp cho online)
  */
+/**
+ * TẠO BOOKING (có hỗ trợ nhiều block slot + order gộp cho online)
+ */
 export const createBooking = handleAsync(async (req, res, next) => {
     const {
         courtId,
@@ -361,6 +470,7 @@ export const createBooking = handleAsync(async (req, res, next) => {
         voucherCode,
         slots,
         totalFieldAmount,
+        equipmentBySlot,
     } = req.body;
 
     const hasSlotList = Array.isArray(slots) && slots.length > 0;
@@ -634,6 +744,99 @@ export const createBooking = handleAsync(async (req, res, next) => {
             voucherUsageStatus: isVoucherBooking && voucherPayload ? 'pending' : 'none',
         });
 
+        //  RESERVE + TÍNH TIỀN THIẾT BỊ NGAY KHI TẠO BOOKING
+        let eqMap = equipmentBySlot;
+
+        // FE  gửi string JSON
+        if (typeof eqMap === 'string') {
+            try {
+                eqMap = JSON.parse(eqMap);
+            } catch {
+                eqMap = null;
+            }
+        }
+
+        eqMap = eqMap && typeof eqMap === 'object' ? eqMap : null;
+
+        if (eqMap) {
+            const slotsInThisBooking =
+                Array.isArray(summary.slots) && summary.slots.length > 0
+                    ? summary.slots
+                    : [{ startTime: summary.startTime, endTime: summary.endTime }];
+
+            const merged = collectEquipmentItemsForSlots(slotsInThisBooking, eqMap);
+
+            let equipmentTotalCalc = 0;
+            const changedStocks = [];
+
+            try {
+                for (const it of merged) {
+                    const { equipmentId, mode, qty, price } = it;
+
+                    const eq = await Equipment.findById(equipmentId);
+                    if (!eq) throw createError(404, 'Thiết bị không tồn tại');
+
+                    const stockFieldName = getStockFieldName(eq);
+                    const currentStock = Number(eq[stockFieldName] || 0);
+
+                    if (currentStock < qty) {
+                        throw createError(
+                            400,
+                            `Thiết bị ${eq.name} không đủ số lượng (còn ${currentStock}, yêu cầu ${qty})`
+                        );
+                    }
+
+                    const unitPrice =
+                        typeof price === 'number' && price > 0
+                            ? price
+                            : mode === 'sell'
+                              ? Number(eq.salePrice || 0)
+                              : Number(eq.rentPrice || 0);
+
+                    const lineSubtotal = unitPrice * qty;
+                    equipmentTotalCalc += lineSubtotal;
+
+                    // trừ kho (reserve)
+                    eq[stockFieldName] = currentStock - qty;
+                    await eq.save();
+                    changedStocks.push({ equipmentId: eq._id, stockFieldName, qty });
+
+                    await BookingItem.create({
+                        bookingId: booking._id,
+                        equipmentId,
+                        mode,
+                        qty,
+                        price: unitPrice,
+                        subtotal: lineSubtotal,
+                        name: eq.name,
+                        unit: eq.unit || 'cái',
+                    });
+                }
+
+                // update tổng
+                if (equipmentTotalCalc > 0) {
+                    booking.equipmentTotal = equipmentTotalCalc;
+                    booking.total =
+                        (booking.fieldAmount || 0) +
+                        equipmentTotalCalc -
+                        (booking.discountTotal || 0);
+                    await booking.save();
+                }
+            } catch (err) {
+                // rollback kho + xóa bookingitems + xóa booking
+                await BookingItem.deleteMany({ bookingId: booking._id }).catch(() => {});
+                for (const c of changedStocks) {
+                    const eq = await Equipment.findById(c.equipmentId).catch(() => null);
+                    if (!eq) continue;
+                    eq[c.stockFieldName] = Number(eq[c.stockFieldName] || 0) + Number(c.qty || 0);
+                    await eq.save().catch(() => {});
+                }
+                await Booking.findByIdAndDelete(booking._id).catch(() => {});
+                throw err;
+            }
+        }
+
+        // commit voucher nếu đã PAID ngay lúc tạo (CASH tại quầy / admin)
         if (isVoucherBooking && initialPaymentStatus === PAYMENT_STATUS.PAID) {
             try {
                 const usage = await commitVoucherUsage({
@@ -647,7 +850,19 @@ export const createBooking = handleAsync(async (req, res, next) => {
                 booking.voucherUsageStatus = 'applied';
                 await booking.save();
             } catch (error) {
-                await Booking.findByIdAndDelete(booking._id);
+                // nếu fail commit voucher => rollback luôn kho + bookingItems đã reserve (nếu có)
+                const items = await BookingItem.find({ bookingId: booking._id })
+                    .lean()
+                    .catch(() => []);
+                for (const it of items) {
+                    const eq = await Equipment.findById(it.equipmentId).catch(() => null);
+                    if (!eq) continue;
+                    const stockFieldName = getStockFieldName(eq);
+                    eq[stockFieldName] = Number(eq[stockFieldName] || 0) + Number(it.qty || 0);
+                    await eq.save().catch(() => {});
+                }
+                await BookingItem.deleteMany({ bookingId: booking._id }).catch(() => {});
+                await Booking.findByIdAndDelete(booking._id).catch(() => {});
                 return next(error);
             }
         }
@@ -657,10 +872,7 @@ export const createBooking = handleAsync(async (req, res, next) => {
 
     // TẠO ORDER GỘP CHO ONLINE NHIỀU BOOKING
     if (createdBookings.length > 1 && isOnlineMode) {
-        const totalOrderAmount = createdBookings.reduce(
-            (sum, b) => sum + Number(b.total || b.fieldAmount || 0),
-            0
-        );
+        const totalOrderAmount = createdBookings.reduce((sum, b) => sum + Number(b.total || 0), 0);
 
         const order = await Order.create({
             code: `OD${Date.now().toString().slice(-6)}`,
@@ -808,6 +1020,19 @@ export const cancelBooking = handleAsync(async (req, res, next) => {
     } else if (booking.voucherUsageStatus === 'pending') {
         booking.voucherUsageStatus = 'none';
     }
+    // booking bị hủy khi chưa IN_USE/COMPLETED => trả lại kho thiết bị đã reserve
+    if (![BOOKING_STATUS.IN_USE, BOOKING_STATUS.COMPLETED].includes(previousStatus)) {
+        const items = await BookingItem.find({ bookingId: booking._id }).lean();
+        for (const it of items) {
+            const eq = await Equipment.findById(it.equipmentId);
+            if (!eq) continue;
+
+            const stockFieldName = getStockFieldName(eq);
+            eq[stockFieldName] = Number(eq[stockFieldName] || 0) + Number(it.qty || 0);
+            await eq.save();
+        }
+        await BookingItem.deleteMany({ bookingId: booking._id });
+    }
 
     await booking.save();
 
@@ -836,6 +1061,7 @@ export const createMultiBooking = handleAsync(async (req, res, next) => {
         isOffline,
         customerInfo,
         paidAtCreation,
+        equipmentBySlot,
     } = req.body;
 
     if (!courtId || !date || !timeSlots || !Array.isArray(timeSlots) || timeSlots.length === 0) {
@@ -936,6 +1162,84 @@ export const createMultiBooking = handleAsync(async (req, res, next) => {
             createdBy,
         });
 
+        // RESERVE + TÍNH TIỀN THIẾT BỊ NGAY KHI TẠO BOOKING
+        const eqMap =
+            equipmentBySlot && typeof equipmentBySlot === 'object' ? equipmentBySlot : null;
+
+        if (eqMap) {
+            const k = slotKey(startTime, endTime);
+            const raw = Array.isArray(eqMap[k]) ? eqMap[k] : [];
+            const merged = mergeItems(raw);
+
+            let equipmentTotalCalc = 0;
+            const changedStocks = [];
+
+            try {
+                for (const it of merged) {
+                    const { equipmentId, mode, qty, price } = it;
+
+                    const eq = await Equipment.findById(equipmentId);
+                    if (!eq) throw createError(404, 'Thiết bị không tồn tại');
+
+                    const stockFieldName = getStockFieldName(eq);
+                    const currentStock = Number(eq[stockFieldName] || 0);
+
+                    if (currentStock < qty) {
+                        throw createError(
+                            400,
+                            `Thiết bị ${eq.name} không đủ số lượng (còn ${currentStock}, yêu cầu ${qty})`
+                        );
+                    }
+
+                    const unitPrice =
+                        typeof price === 'number' && price > 0
+                            ? price
+                            : mode === 'sell'
+                              ? Number(eq.salePrice || 0)
+                              : Number(eq.rentPrice || 0);
+
+                    const lineSubtotal = unitPrice * qty;
+                    equipmentTotalCalc += lineSubtotal;
+
+                    // trừ kho (reserve)
+                    eq[stockFieldName] = currentStock - qty;
+                    await eq.save();
+                    changedStocks.push({ equipmentId: eq._id, stockFieldName, qty });
+
+                    await BookingItem.create({
+                        bookingId: booking._id,
+                        equipmentId,
+                        mode,
+                        qty,
+                        price: unitPrice,
+                        subtotal: lineSubtotal,
+                        name: eq.name,
+                        unit: eq.unit || 'cái',
+                    });
+                }
+
+                if (equipmentTotalCalc > 0) {
+                    booking.equipmentTotal = equipmentTotalCalc;
+                    booking.total =
+                        (booking.fieldAmount || 0) +
+                        equipmentTotalCalc -
+                        (booking.discountTotal || 0);
+                    await booking.save();
+                }
+            } catch (err) {
+                // rollback kho + xóa bookingitems + xóa booking
+                await BookingItem.deleteMany({ bookingId: booking._id }).catch(() => {});
+                for (const c of changedStocks) {
+                    const eq = await Equipment.findById(c.equipmentId).catch(() => null);
+                    if (!eq) continue;
+                    eq[c.stockFieldName] = Number(eq[c.stockFieldName] || 0) + Number(c.qty || 0);
+                    await eq.save().catch(() => {});
+                }
+                await Booking.findByIdAndDelete(booking._id).catch(() => {});
+                throw err;
+            }
+        }
+
         createdBookings.push(booking);
 
         const io = req.app.get('io');
@@ -977,6 +1281,196 @@ export const confirmBooking = handleAsync(async (req, res, next) => {
 const CHECKIN_BEFORE_MINUTES = 15; // cho check-in trước giờ đá 15p
 
 // * CHECKIN
+// export const checkinBooking = handleAsync(async (req, res, next) => {
+//     const bookingId = req.params.id;
+//     const { items = [] } = req.body;
+
+//     const booking = await Booking.findById(bookingId);
+//     if (!booking) return next(createError(404, 'Không tìm thấy đơn đặt sân'));
+//     if (booking.status !== BOOKING_STATUS.CONFIRMED) {
+//         return next(createError(400, 'Chỉ đơn đã xác nhận mới được check-in'));
+//     }
+
+//     // //  GIỚI HẠN THỜI GIAN CHECK-IN
+//     // const now = new Date();
+
+//     // const bookingDate = new Date(booking.date);
+//     // if (Number.isNaN(bookingDate.getTime())) {
+//     //     return next(createError(400, 'Ngày đặt của booking không hợp lệ!'));
+//     // }
+
+//     // // So sánh theo "ngày" (bỏ giờ phút giây)
+//     // const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+//     // const matchDay = new Date(
+//     //     bookingDate.getFullYear(),
+//     //     bookingDate.getMonth(),
+//     //     bookingDate.getDate()
+//     // );
+
+//     // // Nếu chưa đúng ngày đá -> không cho check-in
+//     // if (today.getTime() !== matchDay.getTime()) {
+//     //     return next(
+//     //         createError(
+//     //             400,
+//     //             'Chỉ được check-in trong đúng ngày diễn ra lịch đá (không được check-in trước ngày)!'
+//     //         )
+//     //     );
+//     // }
+
+//     // // Lấy giờ bắt đầu sớm nhất của booking (nếu có slots thì dùng slots)
+//     // let earliestStart = booking.startTime;
+//     // if (Array.isArray(booking.slots) && booking.slots.length > 0) {
+//     //     const sortedSlots = [...booking.slots].sort(
+//     //         (a, b) => toMinutes(a.startTime) - toMinutes(b.startTime)
+//     //     );
+//     //     earliestStart = sortedSlots[0].startTime;
+//     // }
+
+//     // if (!earliestStart) {
+//     //     return next(createError(400, 'Booking không có thông tin giờ bắt đầu để check-in!'));
+//     // }
+
+//     // const [sh, sm] = earliestStart.split(':').map(Number);
+//     // const matchStartDateTime = new Date(
+//     //     bookingDate.getFullYear(),
+//     //     bookingDate.getMonth(),
+//     //     bookingDate.getDate(),
+//     //     sh || 0,
+//     //     sm || 0,
+//     //     0,
+//     //     0
+//     // );
+
+//     // // Thời điểm được phép bắt đầu check-in = giờ đá - 15 phút
+//     // const allowFrom = new Date(matchStartDateTime.getTime() - CHECKIN_BEFORE_MINUTES * 60 * 1000);
+
+//     // //  Nếu đang check-in trước thời điểm cho phép
+//     // if (now.getTime() < allowFrom.getTime()) {
+//     //     const hh = String(allowFrom.getHours()).padStart(2, '0');
+//     //     const mm = String(allowFrom.getMinutes()).padStart(2, '0');
+
+//     //     return next(
+//     //         createError(
+//     //             400,
+//     //             `Chỉ được check-in trước giờ đá tối đa ${CHECKIN_BEFORE_MINUTES} phút (từ ${hh}:${mm} trở đi)!`
+//     //         )
+//     //     );
+//     // }
+
+//     const hasNewItems = Array.isArray(items) && items.length > 0;
+
+//     // nếu không truyền items -> chỉ checkin, không động vào kho/bookingItems
+//     if (!hasNewItems) {
+//         booking.status = BOOKING_STATUS.IN_USE;
+//         booking.total =
+//             (booking.fieldAmount || 0) +
+//             (booking.equipmentTotal || 0) -
+//             (booking.discountTotal || 0);
+//         if (booking.voucherUsageStatus === 'applied') booking.voucherUsageStatus = 'consumed';
+//         await booking.save();
+
+//         const io = req.app.get('io');
+//         io?.emit('booking_global_updated');
+//         io?.to(String(booking.courtId)).emit('booking_updated', {
+//             courtId: String(booking.courtId),
+//             date: booking.date.toISOString().slice(0, 10),
+//         });
+
+//         return res.json(createResponse(true, 200, 'Check-in thành công!', booking));
+//     }
+
+//     //  Nếu booking đã reserve từ lúc tạo: restore kho của items cũ trước khi replace
+//     const prevItems = await BookingItem.find({ bookingId }).lean();
+//     for (const it of prevItems) {
+//         const eq = await Equipment.findById(it.equipmentId).catch(() => null);
+//         if (!eq) continue;
+
+//         const stockFieldName = getStockFieldName(eq);
+//         eq[stockFieldName] = Number(eq[stockFieldName] || 0) + Number(it.qty || 0);
+//         await eq.save().catch(() => {});
+//     }
+//     // có items (admin chọn lại) -> lúc này mới xử lý (mày đang làm)
+//     await BookingItem.deleteMany({ bookingId });
+
+//     let equipmentTotalCalc = 0;
+
+//     for (const item of items) {
+//         const { equipmentId, mode, qty, price } = item;
+//         if (!equipmentId || !qty || qty <= 0) continue;
+
+//         const eq = await Equipment.findById(equipmentId);
+//         if (!eq) {
+//             return next(createError(404, `Thiết bị không tồn tại`));
+//         }
+
+//         const stockFieldName =
+//             typeof eq.availableQuantity === 'number'
+//                 ? 'availableQuantity'
+//                 : typeof eq.stockLeft === 'number'
+//                   ? 'stockLeft'
+//                   : typeof eq.stock === 'number'
+//                     ? 'stock'
+//                     : 'totalQuantity';
+
+//         const currentStock = eq[stockFieldName] || 0;
+
+//         if (currentStock < qty) {
+//             return next(
+//                 createError(
+//                     400,
+//                     `Thiết bị ${eq.name} không đủ số lượng (còn ${currentStock}, yêu cầu ${qty})`
+//                 )
+//             );
+//         }
+
+//         const unitPrice =
+//             typeof price === 'number' && price > 0
+//                 ? price
+//                 : mode === 'sell'
+//                   ? eq.salePrice
+//                   : eq.rentPrice;
+
+//         const lineSubtotal = unitPrice * qty;
+//         equipmentTotalCalc += lineSubtotal;
+
+//         eq[stockFieldName] = currentStock - qty;
+//         if (mode === 'rent') {
+//             eq.rentedQuantity = (eq.rentedQuantity || 0) + qty;
+//         }
+//         await eq.save();
+
+//         await BookingItem.create({
+//             bookingId,
+//             equipmentId,
+//             mode,
+//             qty,
+//             price: unitPrice,
+//             subtotal: lineSubtotal,
+//             name: eq.name,
+//             unit: eq.unit || 'gói',
+//         });
+//     }
+
+//     booking.status = BOOKING_STATUS.IN_USE;
+//     booking.equipmentTotal = equipmentTotalCalc;
+//     booking.total =
+//         (booking.fieldAmount || 0) + (booking.equipmentTotal || 0) - (booking.discountTotal || 0);
+//     if (booking.voucherUsageStatus === 'applied') {
+//         booking.voucherUsageStatus = 'consumed';
+//     }
+
+//     await booking.save();
+
+//     const io = req.app.get('io');
+//     io?.emit('booking_global_updated');
+//     io?.to(String(booking.courtId)).emit('booking_updated', {
+//         courtId: String(booking.courtId),
+//         date: booking.date.toISOString().slice(0, 10),
+//     });
+
+//     return res.json(createResponse(true, 200, 'Check-in thành công!', booking));
+// });
+// * CHECKIN
 export const checkinBooking = handleAsync(async (req, res, next) => {
     const bookingId = req.params.id;
     const { items = [] } = req.body;
@@ -987,142 +1481,77 @@ export const checkinBooking = handleAsync(async (req, res, next) => {
         return next(createError(400, 'Chỉ đơn đã xác nhận mới được check-in'));
     }
 
-    // //  GIỚI HẠN THỜI GIAN CHECK-IN
-    // const now = new Date();
+    const hasNewItems = Array.isArray(items) && items.length > 0;
 
-    // const bookingDate = new Date(booking.date);
-    // if (Number.isNaN(bookingDate.getTime())) {
-    //     return next(createError(400, 'Ngày đặt của booking không hợp lệ!'));
-    // }
+    // Nếu có items => coi là THÊM MỚI (append), không restore + không delete
+    if (hasNewItems) {
+        for (const item of items) {
+            const { equipmentId, mode, qty, price } = item;
+            const realQty = Number(qty || 0);
+            if (!equipmentId || realQty <= 0) continue;
 
-    // // So sánh theo "ngày" (bỏ giờ phút giây)
-    // const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    // const matchDay = new Date(
-    //     bookingDate.getFullYear(),
-    //     bookingDate.getMonth(),
-    //     bookingDate.getDate()
-    // );
+            const eq = await Equipment.findById(equipmentId);
+            if (!eq) return next(createError(404, `Thiết bị không tồn tại`));
 
-    // // Nếu chưa đúng ngày đá -> không cho check-in
-    // if (today.getTime() !== matchDay.getTime()) {
-    //     return next(
-    //         createError(
-    //             400,
-    //             'Chỉ được check-in trong đúng ngày diễn ra lịch đá (không được check-in trước ngày)!'
-    //         )
-    //     );
-    // }
+            const stockFieldName = getStockFieldName(eq);
+            const currentStock = Number(eq[stockFieldName] || 0);
 
-    // // Lấy giờ bắt đầu sớm nhất của booking (nếu có slots thì dùng slots)
-    // let earliestStart = booking.startTime;
-    // if (Array.isArray(booking.slots) && booking.slots.length > 0) {
-    //     const sortedSlots = [...booking.slots].sort(
-    //         (a, b) => toMinutes(a.startTime) - toMinutes(b.startTime)
-    //     );
-    //     earliestStart = sortedSlots[0].startTime;
-    // }
+            if (currentStock < realQty) {
+                return next(
+                    createError(
+                        400,
+                        `Thiết bị ${eq.name} không đủ số lượng (còn ${currentStock}, yêu cầu ${realQty})`
+                    )
+                );
+            }
 
-    // if (!earliestStart) {
-    //     return next(createError(400, 'Booking không có thông tin giờ bắt đầu để check-in!'));
-    // }
+            const unitPrice =
+                typeof price === 'number' && price > 0
+                    ? price
+                    : mode === 'sell'
+                      ? Number(eq.salePrice || 0)
+                      : Number(eq.rentPrice || 0);
 
-    // const [sh, sm] = earliestStart.split(':').map(Number);
-    // const matchStartDateTime = new Date(
-    //     bookingDate.getFullYear(),
-    //     bookingDate.getMonth(),
-    //     bookingDate.getDate(),
-    //     sh || 0,
-    //     sm || 0,
-    //     0,
-    //     0
-    // );
+            const lineSubtotal = unitPrice * realQty;
 
-    // // Thời điểm được phép bắt đầu check-in = giờ đá - 15 phút
-    // const allowFrom = new Date(matchStartDateTime.getTime() - CHECKIN_BEFORE_MINUTES * 60 * 1000);
+            // trừ kho
+            eq[stockFieldName] = currentStock - realQty;
+            // (giữ behavior cũ của mày)
+            if (mode === 'rent') eq.rentedQuantity = (eq.rentedQuantity || 0) + realQty;
+            await eq.save();
 
-    // //  Nếu đang check-in trước thời điểm cho phép
-    // if (now.getTime() < allowFrom.getTime()) {
-    //     const hh = String(allowFrom.getHours()).padStart(2, '0');
-    //     const mm = String(allowFrom.getMinutes()).padStart(2, '0');
-
-    //     return next(
-    //         createError(
-    //             400,
-    //             `Chỉ được check-in trước giờ đá tối đa ${CHECKIN_BEFORE_MINUTES} phút (từ ${hh}:${mm} trở đi)!`
-    //         )
-    //     );
-    // }
-
-    // Xóa thiết bị cũ (nếu có) rồi thêm lại theo lần check-in hiện tại
-    await BookingItem.deleteMany({ bookingId });
-
-    let equipmentTotalCalc = 0;
-
-    for (const item of items) {
-        const { equipmentId, mode, qty, price } = item;
-        if (!equipmentId || !qty || qty <= 0) continue;
-
-        const eq = await Equipment.findById(equipmentId);
-        if (!eq) {
-            return next(createError(404, `Thiết bị không tồn tại`));
+            await BookingItem.create({
+                bookingId,
+                equipmentId,
+                mode,
+                qty: realQty,
+                price: unitPrice,
+                subtotal: lineSubtotal,
+                name: eq.name,
+                unit: eq.unit || 'gói',
+            });
         }
-
-        const stockFieldName =
-            typeof eq.availableQuantity === 'number'
-                ? 'availableQuantity'
-                : typeof eq.stockLeft === 'number'
-                  ? 'stockLeft'
-                  : typeof eq.stock === 'number'
-                    ? 'stock'
-                    : 'totalQuantity';
-
-        const currentStock = eq[stockFieldName] || 0;
-
-        if (currentStock < qty) {
-            return next(
-                createError(
-                    400,
-                    `Thiết bị ${eq.name} không đủ số lượng (còn ${currentStock}, yêu cầu ${qty})`
-                )
-            );
-        }
-
-        const unitPrice =
-            typeof price === 'number' && price > 0
-                ? price
-                : mode === 'sell'
-                  ? eq.salePrice
-                  : eq.rentPrice;
-
-        const lineSubtotal = unitPrice * qty;
-        equipmentTotalCalc += lineSubtotal;
-
-        eq[stockFieldName] = currentStock - qty;
-        if (mode === 'rent') {
-            eq.rentedQuantity = (eq.rentedQuantity || 0) + qty;
-        }
-        await eq.save();
-
-        await BookingItem.create({
-            bookingId,
-            equipmentId,
-            mode,
-            qty,
-            price: unitPrice,
-            subtotal: lineSubtotal,
-            name: eq.name,
-            unit: eq.unit || 'gói',
-        });
     }
+
+    // Recalc equipmentTotal từ DB để khỏi lệch
+    const agg = await BookingItem.aggregate([
+        { $match: { bookingId: booking._id } },
+        { $group: { _id: '$bookingId', total: { $sum: '$subtotal' } } },
+    ]);
+    const equipmentTotal = Number(agg?.[0]?.total || 0);
 
     booking.status = BOOKING_STATUS.IN_USE;
-    booking.equipmentTotal = equipmentTotalCalc;
-    booking.total =
-        (booking.fieldAmount || 0) + (booking.equipmentTotal || 0) - (booking.discountTotal || 0);
-    if (booking.voucherUsageStatus === 'applied') {
-        booking.voucherUsageStatus = 'consumed';
-    }
+    booking.equipmentTotal = equipmentTotal;
+    booking.total = Math.max(
+        0,
+        Number(booking.fieldAmount || 0) + equipmentTotal - Number(booking.discountTotal || 0)
+    );
 
+    if (booking.voucherUsageStatus === 'applied') booking.voucherUsageStatus = 'consumed';
+    //nếu online thì paymentStatus phải dựa vào depositAmount, không được giữ PAID cũ
+    if ([PAYMENT_METHOD.VNPAY, PAYMENT_METHOD.MOMO].includes(booking.paymentMethod)) {
+        recalcPaymentStatusByDeposit(booking);
+    }
     await booking.save();
 
     const io = req.app.get('io');
@@ -1530,8 +1959,9 @@ export const getBookingsByUser = handleAsync(async (req, res, next) => {
         .sort({ createdAt: -1 })
         .lean();
 
-    //  Lấy tất cả BookingItem của các booking đó
     const bookingIds = bookings.map((b) => b._id);
+
+    //  Lấy tất cả BookingItem của các booking đó
     const items = await BookingItem.find({ bookingId: { $in: bookingIds } })
         .select('bookingId name mode qty price subtotal unit')
         .lean();
@@ -1551,11 +1981,94 @@ export const getBookingsByUser = handleAsync(async (req, res, next) => {
         });
     }
 
-    // Gắn thêm field equipmentItems vào từng booking
-    const result = bookings.map((b) => ({
-        ...b,
-        equipmentItems: itemsByBooking[String(b._id)] || [],
-    }));
+    //  Lấy invoice mới nhất theo bookingId (nếu có)
+    const invoices = await InvoiceModel.find(
+        { bookingId: { $in: bookingIds } },
+        { _id: 1, bookingId: 1, total: 1, status: 1, paidAt: 1, createdAt: 1 }
+    )
+        .sort({ createdAt: -1 })
+        .lean();
+
+    const invoiceMap = new Map();
+    for (const inv of invoices) {
+        const key = String(inv.bookingId);
+        if (!invoiceMap.has(key)) invoiceMap.set(key, inv); // do đã sort desc
+    }
+
+    // trả thêm các field tính toán để FE khỏi suy đoán
+    const result = bookings.map((b) => {
+        const id = String(b._id);
+
+        const equipmentItems = itemsByBooking[id] || [];
+
+        // tổng thiết bị chuẩn nhất = sum BookingItem.subtotal
+        const equipmentTotalFromItems = equipmentItems.reduce(
+            (sum, it) => sum + Number(it.subtotal || 0),
+            0
+        );
+        const equipmentTotal = Math.max(Number(b.equipmentTotal || 0), equipmentTotalFromItems);
+
+        const fieldAmount = Number(b.fieldAmount || 0);
+        const discountTotal = Number(b.discountTotal || 0); // voucher/discount trên booking
+
+        // tiền sân "phải trả" sau discount booking
+        const fieldDue = Math.max(0, fieldAmount - discountTotal);
+
+        // tổng hiện tại của booking (sau khi add thiết bị thì total tăng)
+        const currentTotal =
+            Number(b.total || 0) > 0
+                ? Number(b.total || 0)
+                : Math.max(0, fieldAmount + equipmentTotal - discountTotal);
+
+        // invoice (nếu có) -> coi như đã chốt thanh toán tại sân (kể cả 0đ)
+        const inv = invoiceMap.get(id) || null;
+        const hasInvoice = !!inv;
+
+        const paymentMethod = String(b.paymentMethod || '').toLowerCase();
+        const paymentStatus = String(b.paymentStatus || '').toLowerCase();
+
+        const depPaid = b.depositStatus === DEPOSIT_STATUS.PAID ? Number(b.depositAmount || 0) : 0;
+
+        let paidTotal = 0;
+
+        if (hasInvoice) {
+            paidTotal = currentTotal;
+        } else if (depPaid > 0) {
+            // online/cọc: lấy đúng số tiền đã thu
+            paidTotal = Math.min(depPaid, currentTotal);
+        } else if (['paid', 'refunded'].includes(paymentStatus)) {
+            // cash/transfer mà không có depositAmount
+            paidTotal = currentTotal;
+        } else {
+            paidTotal = 0;
+        }
+
+        const fieldPaid = Math.min(paidTotal, fieldDue);
+        const equipmentPaid = Math.max(0, paidTotal - fieldPaid);
+        const equipmentUnpaid = Math.max(0, equipmentTotal - equipmentPaid);
+        const unpaidAmount = Math.max(0, currentTotal - paidTotal);
+
+        return {
+            ...b,
+            equipmentItems,
+
+            // chuẩn hóa lại
+            equipmentTotal,
+            currentTotal,
+
+            // invoice info
+            hasInvoice,
+            invoiceId: inv ? String(inv._id) : null,
+            invoiceCollected: inv ? Number(inv.total || 0) : 0, // tiền thu thêm tại sân
+
+            // money breakdown cho FE
+            paidTotal,
+            unpaidAmount,
+            fieldPaid,
+            equipmentPaid,
+            equipmentUnpaid,
+        };
+    });
 
     return res.json(
         createResponse(true, 200, 'Lấy danh sách booking của người dùng thành công!', result)
@@ -1563,171 +2076,72 @@ export const getBookingsByUser = handleAsync(async (req, res, next) => {
 });
 
 // * Lấy thông tin để thanh toán lại (booking lẻ HOẶC đơn gộp)
-export const getRetryPaymentInfo = handleAsync(async (req, res, next) => {
-    const bookingId = req.params.id;
+const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(String(id || ''));
+const safeNum = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
-    const booking = await Booking.findById(bookingId)
-        .populate('courtId', 'name type images image address')
-        .populate('customerId', 'name username phone email')
-        .lean();
+export const getRetryPaymentInfo = async (req, res, next) => {
+    try {
+        const { bookingId } = req.params;
 
-    if (!booking) return next(createError(404, 'Không tìm thấy booking!'));
-
-    const user = req.user;
-
-    if (
-        user?.role === USER_ROLES.USER &&
-        String(booking.customerId?._id || booking.customerId) !== String(user._id)
-    ) {
-        return next(createError(403, 'Bạn không có quyền thanh toán lại đơn này!'));
-    }
-
-    if (booking.status !== BOOKING_STATUS.PENDING) {
-        return next(
-            createError(400, 'Chỉ được thanh toán lại cho đơn đang chờ thanh toán/xác nhận!')
-        );
-    }
-
-    if (booking.paymentMethod !== PAYMENT_METHOD.VNPAY) {
-        return next(
-            createError(
-                400,
-                'Đơn này không thanh toán bằng VNPay nên không thể thanh toán lại online!'
-            )
-        );
-    }
-
-    if ([PAYMENT_STATUS.PAID, PAYMENT_STATUS.REFUNDED].includes(booking.paymentStatus)) {
-        return next(
-            createError(
-                400,
-                'Đơn này đã thanh toán đủ hoặc đã hoàn tiền, không thể thanh toán lại!'
-            )
-        );
-    }
-
-    const checkSlotAvailable = async (b) => {
-        const day = new Date(b.date);
-        if (Number.isNaN(day.getTime())) return;
-
-        day.setHours(0, 0, 0, 0);
-        const nextDay = new Date(day);
-        nextDay.setDate(day.getDate() + 1);
-
-        const bookingsSameDay = await Booking.find({
-            courtId: b.courtId,
-            date: { $gte: day, $lt: nextDay },
-            status: { $ne: BOOKING_STATUS.CANCELLED },
-            _id: { $ne: b._id },
-        }).lean();
-
-        const requestSlots =
-            Array.isArray(b.slots) && b.slots.length > 0
-                ? b.slots.map((s) => ({ startTime: s.startTime, endTime: s.endTime }))
-                : [{ startTime: b.startTime, endTime: b.endTime }];
-
-        if (hasAnyOverlapWithBookings(requestSlots, bookingsSameDay)) {
-            const dateStr = new Date(b.date).toLocaleDateString('vi-VN');
-            const timeStr = requestSlots.map((s) => `${s.startTime} - ${s.endTime}`).join(', ');
-
-            throw createError(
-                400,
-                `Khung giờ ${timeStr} ngày ${dateStr} đã được khách khác thanh toán trước. Đơn của bạn không thể thanh toán lại, vui lòng đặt sân mới hoặc chọn khung giờ khác.`
-            );
+        if (!isValidObjectId(bookingId)) {
+            return res.status(400).json({ success: false, message: 'bookingId không hợp lệ' });
         }
-    };
 
-    if (booking.orderId) {
-        const order = await Order.findById(booking.orderId).lean();
-        if (!order) {
-            console.warn('[getRetryPaymentInfo] orderId tồn tại nhưng không tìm thấy Order');
-        } else {
-            const orderBookings = await Booking.find({ orderId: booking.orderId }).lean();
-
-            const payableBookings = orderBookings.filter(
-                (b) =>
-                    b.status === BOOKING_STATUS.PENDING &&
-                    ![PAYMENT_STATUS.PAID, PAYMENT_STATUS.REFUNDED].includes(b.paymentStatus)
-            );
-
-            if (payableBookings.length === 0) {
-                return next(
-                    createError(
-                        400,
-                        'Tất cả các ca trong đơn này đã được thanh toán hoặc hoàn tiền!'
-                    )
-                );
-            }
-
-            for (const b of payableBookings) {
-                await checkSlotAvailable(b);
-            }
-
-            const total = payableBookings.reduce(
-                (sum, b) => sum + Number(b.total || b.fieldAmount || 0),
-                0
-            );
-
-            const depositPaid = payableBookings.reduce((sum, b) => {
-                if (b.depositStatus === DEPOSIT_STATUS.PAID) {
-                    return sum + Number(b.depositAmount || 0);
-                }
-                return sum;
-            }, 0);
-
-            const amountToPay = Math.max(0, total - depositPaid);
-            if (amountToPay <= 0) {
-                return next(createError(400, 'Đơn này đã thanh toán đủ tiền!'));
-            }
-
-            return res.json(
-                createResponse(true, 200, 'Lấy thông tin thanh toán lại thành công!', {
-                    type: 'order',
-                    orderId: order._id,
-                    bookingIds: payableBookings.map((b) => b._id),
-                    status: order.status,
-                    paymentStatus: order.paymentStatus,
-                    total,
-                    paidAmount: depositPaid,
-                    amountToPay,
-                    court: booking.courtId,
-                    customer: booking.customerId,
-                    date: booking.date,
-                })
-            );
+        const booking = await Booking.findById(bookingId);
+        if (!booking) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy booking' });
         }
+
+        // nhóm theo orderId (đúng với FE đang group)
+        const bookings = booking.orderId
+            ? await Booking.find({ orderId: booking.orderId, customerId: booking.customerId })
+            : [booking];
+
+        const ids = bookings.map((b) => b._id);
+
+        // cộng thiết bị từ BookingItem
+        const itemsAgg = await BookingItem.aggregate([
+            { $match: { bookingId: { $in: ids } } },
+            { $group: { _id: '$bookingId', total: { $sum: '$subtotal' } } },
+        ]);
+
+        const equipmentMap = new Map(itemsAgg.map((r) => [String(r._id), safeNum(r.total)]));
+
+        const calcTotal = (b) => {
+            const field = safeNum(b.fieldAmount);
+            const discount = safeNum(b.discountTotal);
+
+            const eqAgg = equipmentMap.get(String(b._id)) || 0;
+            const eqStored = safeNum(b.equipmentTotal);
+            const eqTotal = Math.max(eqAgg, eqStored);
+
+            return Math.max(0, field + eqTotal - discount);
+        };
+
+        const total = bookings.reduce((sum, b) => sum + calcTotal(b), 0);
+
+        const paidDeposit = bookings.reduce((sum, b) => {
+            const dep = b.depositStatus === DEPOSIT_STATUS.PAID ? safeNum(b.depositAmount) : 0;
+            return sum + dep;
+        }, 0);
+
+        const amountToPay = Math.max(0, total - paidDeposit);
+
+        return res.json({
+            success: true,
+            data: {
+                bookingId: String(booking._id),
+                bookingIds: ids.map(String),
+                total,
+                paidDeposit,
+                amountToPay,
+                type: bookings.length > 1 ? 'order' : 'single',
+            },
+        });
+    } catch (err) {
+        next(err);
     }
-
-    await checkSlotAvailable(booking);
-
-    const total = Number(booking.total || booking.fieldAmount || 0);
-
-    const depositPaid =
-        booking.depositStatus === DEPOSIT_STATUS.PAID ? Number(booking.depositAmount || 0) : 0;
-
-    const amountToPay = Math.max(0, total - depositPaid);
-
-    if (amountToPay <= 0) {
-        return next(createError(400, 'Đơn này đã thanh toán đủ tiền!'));
-    }
-
-    return res.json(
-        createResponse(true, 200, 'Lấy thông tin thanh toán lại thành công!', {
-            type: 'booking',
-            bookingId: booking._id,
-            status: booking.status,
-            paymentStatus: booking.paymentStatus,
-            total,
-            paidAmount: depositPaid,
-            amountToPay,
-            court: booking.courtId,
-            customer: booking.customerId,
-            date: booking.date,
-            startTime: booking.startTime,
-            endTime: booking.endTime,
-        })
-    );
-});
+};
 
 //*từ chối hoàn tiền
 export const rejectRefundBooking = handleAsync(async (req, res, next) => {
@@ -1801,9 +2215,10 @@ export const completeRefundBooking = handleAsync(async (req, res, next) => {
 });
 
 // * Thuê thêm thiết bị khi đang sử dụng
+// * Thuê thêm thiết bị khi đang sử dụng
 export const addEquipmentsBooking = handleAsync(async (req, res, next) => {
     const bookingId = req.params.id;
-    const { items = [], equipmentTotal } = req.body;
+    const { items = [] } = req.body; // bỏ equipmentTotal khỏi body
 
     const booking = await Booking.findById(bookingId);
     if (!booking) return next(createError(404, 'Không tìm thấy đơn đặt sân'));
@@ -1812,28 +2227,17 @@ export const addEquipmentsBooking = handleAsync(async (req, res, next) => {
         return next(createError(400, 'Chỉ đơn đang sử dụng mới được thêm thiết bị'));
     }
 
-    let equipmentTotalCalc = 0;
-
     for (const item of items) {
         const { equipmentId, mode, qty, price } = item;
         const realQty = Number(qty || 0);
         if (!equipmentId || realQty <= 0) continue;
 
         const eq = await Equipment.findById(equipmentId);
-        if (!eq) {
-            return next(createError(404, `Thiết bị không tồn tại`));
-        }
+        if (!eq) return next(createError(404, `Thiết bị không tồn tại`));
 
-        const stockFieldName =
-            typeof eq.availableQuantity === 'number'
-                ? 'availableQuantity'
-                : typeof eq.stockLeft === 'number'
-                  ? 'stockLeft'
-                  : typeof eq.stock === 'number'
-                    ? 'stock'
-                    : 'totalQuantity';
+        const stockFieldName = getStockFieldName(eq);
+        const currentStock = Number(eq[stockFieldName] || 0);
 
-        const currentStock = eq[stockFieldName] || 0;
         if (currentStock < realQty) {
             return next(
                 createError(
@@ -1847,16 +2251,16 @@ export const addEquipmentsBooking = handleAsync(async (req, res, next) => {
             typeof price === 'number' && price > 0
                 ? price
                 : mode === 'sell'
-                  ? eq.salePrice
-                  : eq.rentPrice;
+                  ? Number(eq.salePrice || 0)
+                  : Number(eq.rentPrice || 0);
 
         const lineSubtotal = unitPrice * realQty;
-        equipmentTotalCalc += lineSubtotal;
 
+        // trừ kho
         eq[stockFieldName] = currentStock - realQty;
-        if (mode === 'rent') {
-            eq.rentedQuantity = (eq.rentedQuantity || 0) + realQty;
-        }
+        if (mode === 'rent') eq.rentedQuantity = (eq.rentedQuantity || 0) + realQty;
+
+        await eq.save();
 
         await BookingItem.create({
             bookingId,
@@ -1868,13 +2272,25 @@ export const addEquipmentsBooking = handleAsync(async (req, res, next) => {
             name: eq.name,
             unit: eq.unit || 'cái',
         });
-        await eq.save();
     }
 
-    const addTotal =
-        typeof equipmentTotal === 'number' ? Number(equipmentTotal) : Number(equipmentTotalCalc);
-    booking.equipmentTotal = (booking.equipmentTotal || 0) + addTotal;
-    booking.total = (booking.fieldAmount || 0) + booking.equipmentTotal - booking.discountTotal;
+    // Recalc equipmentTotal từ DB (chuẩn nhất)
+    const agg = await BookingItem.aggregate([
+        { $match: { bookingId: booking._id } },
+        { $group: { _id: '$bookingId', total: { $sum: '$subtotal' } } },
+    ]);
+    const equipmentTotalFromDb = Number(agg?.[0]?.total || 0);
+
+    booking.equipmentTotal = equipmentTotalFromDb;
+    booking.total = Math.max(
+        0,
+        Number(booking.fieldAmount || 0) + equipmentTotalFromDb - Number(booking.discountTotal || 0)
+    );
+
+    // online: phát sinh thêm tiền thì paymentStatus phải tự hạ theo depositAmount
+    if ([PAYMENT_METHOD.VNPAY, PAYMENT_METHOD.MOMO].includes(booking.paymentMethod)) {
+        recalcPaymentStatusByDeposit(booking);
+    }
 
     await booking.save();
 
