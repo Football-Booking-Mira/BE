@@ -11,6 +11,7 @@ import {
     getFieldsNeedReview,
     getReviewDetail,
     getReviewsByCourt,
+    updateReviewStatus,
 } from "./review.controller.js";
 // 
 routerReview.get("/need-review/:id", 
@@ -31,6 +32,12 @@ routerReview.get(
     getReviewDetail
 );
 routerReview.get("/court-pulic/:courtId", getReviewsByCourt);
+routerReview.patch(
+    "/:id/status",
+    authenticate,
+    authorize("admin"),
+    updateReviewStatus
+);
 
 // 
 export default 

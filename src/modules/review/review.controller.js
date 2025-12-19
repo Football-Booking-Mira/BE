@@ -234,3 +234,28 @@ export const getReviewDetail = handleAsync(async (req, res, next) => {
     );
 });
 
+export const updateReviewStatus = handleAsync(async (req, res, next) => {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    // validate status
+    if (!["active", "inactive"].includes(status)) {
+        return next(createError(400, "Trạng thái không hợp lệ"));
+    }
+
+    const review = await Review.findByIdAndUpdate(
+        id,
+        { status },
+        { new: true }
+    )
+        .populate("userId", "name email")
+        .populate("courtId", "name");
+
+    if (!review) {
+        return next(createError(404, "Không tìm thấy đánh giá"));
+    }
+
+    return res.json(
+        createResponse(true, 200, "Cập nhật trạng thái đánh giá thành công", review)
+    );
+});
