@@ -28,6 +28,54 @@ const toMinutes = (t) => {
         .map(Number);
     return h * 60 + m;
 };
+const distributeDiscountByAmount = (amounts = [], totalDiscount = 0) => {
+    const nums = amounts.map((v) => Math.max(0, Number(v || 0)));
+    const total = nums.reduce((s, v) => s + v, 0);
+
+    const discountTotal = Math.min(Math.max(0, Number(totalDiscount || 0)), total);
+    if (total <= 0 || discountTotal <= 0) return nums.map(() => 0);
+
+    // Largest Remainder Method
+    const rows = nums.map((amt, i) => {
+        const raw = (discountTotal * amt) / total;
+        const flo = Math.min(amt, Math.floor(raw));
+        return { i, amt, raw, flo, rem: raw - flo };
+    });
+
+    let sumFlo = rows.reduce((s, r) => s + r.flo, 0);
+    let leftover = discountTotal - sumFlo;
+
+    rows.sort((a, b) => b.rem - a.rem);
+
+    // phân nốt phần lẻ
+    for (const r of rows) {
+        if (leftover <= 0) break;
+        const cap = r.amt - r.flo;
+        if (cap <= 0) continue;
+
+        const add = Math.min(cap, leftover);
+        r.flo += add;
+        leftover -= add;
+    }
+
+    // nếu vẫn còn (hiếm, do cap), rải tuần tự
+    if (leftover > 0) {
+        for (const r of rows) {
+            if (leftover <= 0) break;
+            const cap = r.amt - r.flo;
+            if (cap <= 0) continue;
+
+            const add = Math.min(cap, leftover);
+            r.flo += add;
+            leftover -= add;
+        }
+    }
+
+    const out = Array(nums.length).fill(0);
+    for (const r of rows) out[r.i] = r.flo;
+
+    return out;
+};
 
 const overlap = (a1, a2, b1, b2) => Math.max(0, Math.min(a2, b2) - Math.max(a1, b1));
 
@@ -492,9 +540,10 @@ export const createBooking = handleAsync(async (req, res, next) => {
     };
 
     let slotGroups = [];
+    let cleanedSlots = []; //  khai báo ngoài để dùng về sau
 
     if (hasSlotList) {
-        const cleanedSlots = slots.filter((s) => s && s.startTime && s.endTime);
+        cleanedSlots = slots.filter((s) => s && s.startTime && s.endTime);
         if (cleanedSlots.length === 0) {
             return next(createError(400, 'Danh sách ca không hợp lệ!'));
         }
@@ -606,8 +655,8 @@ export const createBooking = handleAsync(async (req, res, next) => {
     });
 
     const requestSlots =
-        hasSlotList && slots.length > 0
-            ? slots
+        hasSlotList && cleanedSlots.length > 0
+            ? cleanedSlots
             : [{ startTime: groupSummaries[0].startTime, endTime: groupSummaries[0].endTime }];
 
     if (hasAnyOverlapWithBookings(requestSlots, bookingsSameDay)) {
@@ -620,22 +669,41 @@ export const createBooking = handleAsync(async (req, res, next) => {
             return next(createError(400, 'Vui lòng chọn khách hàng để áp dụng voucher!'));
         }
 
-        const primaryGroup = groupSummaries[0];
-        const primarySlots = slotGroups[0];
+        const totalFieldAllGroups = groupSummaries.reduce(
+            (sum, g) => sum + Number(g.fieldAmount || 0),
+            0
+        );
+
+        // nếu FE gửi slots[] thì dùng toàn bộ slots (không chỉ group 0)
+        const allSlots = hasSlotList ? cleanedSlots : undefined;
 
         voucherPayload = await validateVoucherForOrder({
             code: voucherCode,
             userId: finalCustomerId,
-            orderTotal: primaryGroup.fieldAmount,
+
+            //  voucher tính theo tổng tiền sân của cả đơn
+            orderTotal: totalFieldAllGroups,
+
             courtId,
             courtType: court.type,
             bookingDate: date,
-            startTime: primaryGroup.startTime,
-            slots: hasSlotList ? primarySlots : undefined,
+
+            // dùng ca đầu làm mốc giờ (nếu service cần)
+            startTime: groupSummaries[0].startTime,
+
+            //  gửi toàn bộ slots để service check điều kiện (nếu có)
+            slots: allSlots,
         });
     }
 
-    const voucherDiscount = voucherPayload?.discountAmount || 0;
+    const voucherDiscountTotal = voucherPayload?.discountAmount || 0;
+    //  chia theo tỉ lệ tiền sân của từng group
+    const discountByGroup = voucherPayload
+        ? distributeDiscountByAmount(
+              groupSummaries.map((g) => g.fieldAmount),
+              voucherDiscountTotal
+          )
+        : groupSummaries.map(() => 0);
 
     const initialStatus = isOfflineMode ? BOOKING_STATUS.CONFIRMED : BOOKING_STATUS.PENDING;
 
@@ -687,7 +755,8 @@ export const createBooking = handleAsync(async (req, res, next) => {
             initialPaymentStatus = PAYMENT_STATUS.UNPAID;
         }
 
-        const discountForThisBooking = isVoucherBooking ? voucherDiscount : 0;
+        //  mỗi booking nhận 1 phần discount
+        const discountForThisBooking = Number(discountByGroup[index] || 0);
         const totalForThisBooking = Math.max(0, summary.fieldAmount - discountForThisBooking);
 
         const booking = await Booking.create({
@@ -718,7 +787,8 @@ export const createBooking = handleAsync(async (req, res, next) => {
             depositMethod,
             voucherId: isVoucherBooking ? voucherPayload?.voucher?._id || null : null,
             voucherCode: isVoucherBooking ? voucherPayload?.normalizedCode || '' : '',
-            voucherDiscount: isVoucherBooking ? voucherDiscount : 0,
+            voucherDiscount: isVoucherBooking ? voucherDiscountTotal : 0, //  tổng discount để commit usage 1 lần
+            voucherUsageStatus: isVoucherBooking && voucherPayload ? 'pending' : 'none',
             voucherSnapshot:
                 isVoucherBooking && voucherPayload
                     ? {
@@ -833,8 +903,8 @@ export const createBooking = handleAsync(async (req, res, next) => {
                     voucherId: voucherPayload.voucher._id,
                     bookingId: booking._id,
                     userId: finalCustomerId,
-                    discountAmount: voucherDiscount,
-                    orderTotal: summary.fieldAmount,
+                    discountAmount: voucherDiscountTotal,
+                    orderTotal: totalFieldAllGroups,
                 });
                 booking.voucherUsageId = usage._id;
                 booking.voucherUsageStatus = 'applied';
