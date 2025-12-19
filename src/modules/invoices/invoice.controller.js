@@ -54,23 +54,30 @@ export const createInvoice = async (req, res) => {
             });
         }
 
-        // Tính tiền: tổng - đã trả - giảm giá
-        // giảm giá trên HÓA ĐƠN (khác với voucher trên booking)
         const discountVal = Math.max(0, Number(discount) || 0);
 
-        // Tổng tiền booking (sân + thiết bị - giảm giá trên booking nếu có)
-        const grossTotal = Number(booking.total || 0);
+        //  Recalc thiết bị theo DB
+        const agg = await BookingItem.aggregate([
+            { $match: { bookingId: booking._id } },
+            { $group: { _id: '$bookingId', total: { $sum: '$subtotal' } } },
+        ]);
+        const equipmentTotalFromDb = Number(agg?.[0]?.total || 0);
+        const equipmentTotal = Math.max(equipmentTotalFromDb, Number(booking.equipmentTotal || 0));
 
-        // Số tiền đã thanh toán trước (online / cọc) mà booking đang ghi nhận
-        const prepaidAmount = Number(booking.depositAmount || 0);
+        // Tổng hiện tại của booking (Sân + Thiết bị - Voucher/discountTotal trên booking)
+        const fieldAmount = Number(booking.fieldAmount || 0);
+        const voucherDiscount = Number(booking.discountTotal || 0);
+        const grossTotal = Math.max(0, fieldAmount + equipmentTotal - voucherDiscount);
 
-        // Còn phải thu trước khi áp dụng giảm trên hóa đơn
+        //  Đã thanh toán trước (chỉ tính khi depositStatus PAID)
+        const prepaidAmount =
+            booking.depositStatus === 'paid' ? Number(booking.depositAmount || 0) : 0;
+
         const remainingBeforeDiscount = Math.max(0, grossTotal - prepaidAmount);
 
-        // Không cho giảm vượt quá số tiền còn phải thu
+        // giảm trên hóa đơn chỉ được giảm trên phần còn phải thu
         const discountApplied = Math.min(discountVal, remainingBeforeDiscount);
 
-        // Số tiền cần thu thêm tại sân (có thể = 0 nếu khách đã trả đủ)
         const totalToPay = Math.max(0, remainingBeforeDiscount - discountApplied);
 
         //  Tạo invoice: totalToPay = 0 vẫn tạo
@@ -144,28 +151,28 @@ export const createInvoice = async (req, res) => {
             await InvoiceItemModel.insertMany(items);
         }
 
-        //  Cập nhật booking trạng thái thanh toán
-        const currentDeposit = Number(booking.depositAmount || 0);
-        const newDepositAmount = currentDeposit + totalToPay;
+        // sync lại tổng (để các màn hình khác đọc 1 nguồn)
+        booking.equipmentTotal = equipmentTotal;
+        booking.total = grossTotal;
 
-        // booking được coi là paid khi đã có hóa đơn xác nhận
-        booking.paymentStatus = 'paid';
+        // tiền đã thu trước + thu thêm ở hóa đơn này
+        const paidBefore = prepaidAmount; // đã tính theo depositStatus ở trên
+        const paidAfter = Math.min(grossTotal, paidBefore + totalToPay);
 
-        // CHỈ khi có thu thêm tiền (totalToPay > 0) mới:
-        // - cập nhật method theo lần thu tại sân
-        // - cộng thêm depositAmount
-        if (totalToPay > 0) {
-            booking.paymentMethod = method;
-            booking.depositAmount = newDepositAmount;
-        } else {
-            // không thu thêm => giữ nguyên deposit + method
-            booking.depositAmount = currentDeposit;
-        }
+        // cập nhật depositAmount theo tổng đã thu (không cộng bừa vào deposit cũ khi depositStatus chưa PAID)
+        booking.depositAmount = paidAfter;
 
-        // Nếu tổng tiền đã trả >= tổng tiền booking => đánh dấu đã trả đủ
-        if (booking.depositAmount >= grossTotal) {
-            booking.depositStatus = 'paid';
-        }
+        // paymentStatus theo số tiền đã thu
+        if (grossTotal > 0 && paidAfter >= grossTotal) booking.paymentStatus = 'paid';
+        else if (paidAfter > 0) booking.paymentStatus = 'partial';
+        else booking.paymentStatus = 'unpaid';
+
+        // depositStatus theo paidAfter
+        if (grossTotal > 0 && paidAfter >= grossTotal) booking.depositStatus = 'paid';
+
+        // chỉ đổi phương thức khi có thu thêm
+        if (totalToPay > 0) booking.paymentMethod = method;
+        else booking.paymentMethod = booking.paymentMethod || method;
 
         await booking.save();
 
