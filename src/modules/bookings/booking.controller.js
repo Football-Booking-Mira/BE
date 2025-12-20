@@ -1037,6 +1037,7 @@ export const cancelBooking = handleAsync(async (req, res, next) => {
     booking.status = BOOKING_STATUS.CANCELLED;
     booking.updatedAt = new Date();
     booking.cancelledAt = new Date();
+    await booking.save();
 
     booking.cancelBy = user.role;
 
@@ -1069,17 +1070,26 @@ export const cancelBooking = handleAsync(async (req, res, next) => {
             'Admin hủy đơn online và đang xử lý hoàn tiền cho khách';
     }
 
+    const remainingBookings = await Booking.countDocuments({
+    orderId: booking.orderId,
+    status: { $nin: [BOOKING_STATUS.CANCELLED] }
+    });
+
     if (
-        booking.voucherUsageId &&
-        booking.voucherUsageStatus === 'applied' &&
-        ![BOOKING_STATUS.IN_USE, BOOKING_STATUS.COMPLETED].includes(previousStatus)
-    ) {
-        await restoreVoucherUsage(booking);
-        booking.voucherUsageStatus = 'restored';
-        booking.voucherRestoredAt = new Date();
-    } else if (booking.voucherUsageStatus === 'pending') {
-        booking.voucherUsageStatus = 'none';
-    }
+    booking.voucherUsageId &&
+    booking.voucherUsageStatus === 'applied' &&
+    ![BOOKING_STATUS.IN_USE, BOOKING_STATUS.COMPLETED].includes(previousStatus) &&
+    remainingBookings === 0 // 🔥 CHỈ BOOKING CUỐI CÙNG
+) {
+    await restoreVoucherUsage(booking);
+    booking.voucherUsageStatus = 'restored';
+    booking.voucherRestoredAt = new Date();
+} else if (booking.voucherUsageStatus === 'pending') {
+    booking.voucherUsageStatus = 'none';
+}
+
+await booking.save(); // 🔥 SAVE LẦN CUỐI
+
 
     // booking bị hủy khi chưa IN_USE/COMPLETED => trả lại kho thiết bị đã reserve
     if (![BOOKING_STATUS.IN_USE, BOOKING_STATUS.COMPLETED].includes(previousStatus)) {
