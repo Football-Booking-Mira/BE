@@ -1,35 +1,38 @@
 // controllers/review.controllers.js
 
-import handleAsync from "../../utils/handleAsync.js";
-import createError from "../../utils/error.js";
-import createResponse from "../../utils/responses.js";
+import handleAsync from '../../utils/handleAsync.js';
+import createError from '../../utils/error.js';
+import createResponse from '../../utils/responses.js';
 
-import Review from "./review.models.js";
-import Booking from "../bookings/booking.models.js";
-
-import { BOOKING_STATUS, PAYMENT_STATUS, USER_ROLES } from "../../common/constants/enums.js";
+import Review from './review.models.js';
+import Booking from '../bookings/booking.models.js';
+import { BOOKING_STATUS, PAYMENT_STATUS, USER_ROLES } from '../../common/constants/enums.js';
 
 export const createReview = handleAsync(async (req, res, next) => {
     const { bookingId, rating, comment } = req.body;
     const userId = req.user._id;
 
     const booking = await Booking.findById(bookingId);
-    if (!booking) return next(createError(404, "Không tìm thấy booking"));
+    if (!booking) return next(createError(404, 'Không tìm thấy booking'));
 
     // Check điều kiện được đánh giá
-    if (booking.status !== BOOKING_STATUS.COMPLETED ||
-        booking.paymentStatus !== PAYMENT_STATUS.PAID) {
-        return next(createError(400, "Bạn chỉ được đánh giá khi đơn đã hoàn thành và đã thanh toán"));
+    if (
+        booking.status !== BOOKING_STATUS.COMPLETED ||
+        booking.paymentStatus !== PAYMENT_STATUS.PAID
+    ) {
+        return next(
+            createError(400, 'Bạn chỉ được đánh giá khi đơn đã hoàn thành và đã thanh toán')
+        );
     }
 
     // Confirm booking belongs to user
     if (String(booking.customerId) !== String(userId)) {
-        return next(createError(403, "Không thể đánh giá booking không thuộc về bạn"));
+        return next(createError(403, 'Không thể đánh giá booking không thuộc về bạn'));
     }
 
     // Prevent duplicate review
     const exist = await Review.findOne({ bookingId });
-    if (exist) return next(createError(400, "Booking này đã được đánh giá"));
+    if (exist) return next(createError(400, 'Booking này đã được đánh giá'));
 
     const review = await Review.create({
         bookingId,
@@ -39,39 +42,49 @@ export const createReview = handleAsync(async (req, res, next) => {
         comment,
     });
 
-    return res.json(createResponse(true, 201, "Đánh giá thành công", review));
+    return res.json(createResponse(true, 201, 'Đánh giá thành công', review));
 });
 
 export const getMyReviews = handleAsync(async (req, res, next) => {
     const userId = req.user._id;
 
-    const reviews = await Review.find({ userId })
-        .populate("courtId bookingId");
+    const reviews = await Review.find({ userId }).populate('courtId bookingId');
 
-    return res.json(createResponse(true, 200, "Danh sách đánh giá của bạn", reviews));
+    return res.json(createResponse(true, 200, 'Danh sách đánh giá của bạn', reviews));
 });
 
 export const adminGetReviews = handleAsync(async (req, res, next) => {
-    const { page = 1, limit = 20, status, courtId } = req.query;
+    const page = Number(req.query.page || 1);
+    const limit = Number(req.query.limit || 20);
+    const { status, courtId } = req.query;
 
     const query = {};
-    if (status) query.status = status;
+    if (status) query.status = status; // active | hidden
     if (courtId) query.courtId = courtId;
 
-    const reviews = await Review.find(query)
-        .populate("userId courtId bookingId")
-        .skip((page - 1) * limit)
-        .limit(Number(limit))
-        .sort({ createdAt: -1 });
+    // lấy hết rồi lọc
+    const raw = await Review.find(query)
+        .populate('userId', 'name phone email')
+        .populate('courtId', 'code name type')
+        .populate('bookingId', 'code date startTime endTime total')
+        .sort({ createdAt: -1 })
+        .lean();
 
-    const total = await Review.countDocuments(query);
+    //  bỏ review mồ côi
+    const cleaned = raw.filter((r) => r.bookingId);
+
+    const total = cleaned.length;
+    const start = (page - 1) * limit;
+    const end = start + limit;
+
+    const reviews = cleaned.slice(start, end);
 
     return res.json(
-        createResponse(true, 200, "Danh sách đánh giá", {
+        createResponse(true, 200, 'Danh sách đánh giá', {
             reviews,
             pagination: {
-                page: Number(page),
-                limit: Number(limit),
+                page,
+                limit,
                 total,
                 totalPages: Math.ceil(total / limit),
             },
@@ -84,17 +97,17 @@ export const getReviewsByCourt = handleAsync(async (req, res, next) => {
     const { page = 1, limit = 10 } = req.query;
 
     if (!courtId) {
-        return next(createError(400, "Thiếu courtId"));
+        return next(createError(400, 'Thiếu courtId'));
     }
 
     const query = {
         courtId,
-        status: "active",
+        status: 'active',
     };
 
     const reviews = await Review.find(query)
-        .populate("userId", "name avatar")
-        .populate("bookingId", "date startTime endTime")
+        .populate('userId', 'name avatar')
+        .populate('bookingId', 'date startTime endTime')
         .sort({ createdAt: -1 })
         .skip((Number(page) - 1) * Number(limit))
         .limit(Number(limit))
@@ -103,7 +116,7 @@ export const getReviewsByCourt = handleAsync(async (req, res, next) => {
     const total = await Review.countDocuments(query);
 
     return res.json(
-        createResponse(true, 200, "Danh sách đánh giá của sân", {
+        createResponse(true, 200, 'Danh sách đánh giá của sân', {
             reviews,
             pagination: {
                 page: Number(page),
@@ -115,7 +128,6 @@ export const getReviewsByCourt = handleAsync(async (req, res, next) => {
     );
 });
 
-
 export const updateReview = handleAsync(async (req, res, next) => {
     const reviewId = req.params.id;
     const { rating, comment } = req.body;
@@ -123,17 +135,17 @@ export const updateReview = handleAsync(async (req, res, next) => {
     const role = req.user.role;
 
     const review = await Review.findById(reviewId);
-    if (!review) return next(createError(404, "Không tìm thấy review"));
+    if (!review) return next(createError(404, 'Không tìm thấy review'));
 
     if (role !== USER_ROLES.ADMIN && String(review.userId) !== String(userId)) {
-        return next(createError(403, "Không có quyền sửa đánh giá này"));
+        return next(createError(403, 'Không có quyền sửa đánh giá này'));
     }
 
     review.rating = rating ?? review.rating;
     review.comment = comment ?? review.comment;
     await review.save();
 
-    return res.json(createResponse(true, 200, "Cập nhật đánh giá thành công", review));
+    return res.json(createResponse(true, 200, 'Cập nhật đánh giá thành công', review));
 });
 
 export const deleteReview = handleAsync(async (req, res, next) => {
@@ -142,15 +154,15 @@ export const deleteReview = handleAsync(async (req, res, next) => {
     const role = req.user.role;
 
     const review = await Review.findById(reviewId);
-    if (!review) return next(createError(404, "Không tìm thấy review"));
+    if (!review) return next(createError(404, 'Không tìm thấy review'));
 
     if (role !== USER_ROLES.ADMIN && String(review.userId) !== String(userId)) {
-        return next(createError(403, "Không có quyền xóa đánh giá này"));
+        return next(createError(403, 'Không có quyền xóa đánh giá này'));
     }
 
     await review.deleteOne();
 
-    return res.json(createResponse(true, 200, "Xóa đánh giá thành công"));
+    return res.json(createResponse(true, 200, 'Xóa đánh giá thành công'));
 });
 
 export const getFieldsNeedReview = async (req, res) => {
@@ -161,101 +173,87 @@ export const getFieldsNeedReview = async (req, res) => {
         const bookings = await Booking.find({
             customerId: userId,
             status: BOOKING_STATUS.COMPLETED,
-            paymentStatus: PAYMENT_STATUS.PAID
+            paymentStatus: PAYMENT_STATUS.PAID,
         })
-            .select("_id courtId date startTime endTime total")
-            .populate("courtId", "_id name type images")
+            .select('_id courtId date startTime endTime total')
+            .populate('courtId', '_id name type images')
             .lean();
 
         if (!bookings.length) {
             return res.json({
                 reviewedCourts: [],
-                unreviewedCourts: { total: 0, items: [] }
+                unreviewedCourts: { total: 0, items: [] },
             });
         }
 
-        const bookingIds = bookings.map(b => b._id.toString());
+        const bookingIds = bookings.map((b) => b._id.toString());
 
         // 2. Lấy review theo bookingId
         const reviews = await Review.find({
             userId,
-            bookingId: { $in: bookingIds }
+            bookingId: { $in: bookingIds },
         })
-            .select("_id bookingId")
+            .select('_id bookingId')
             .lean();
 
         // map bookingId -> reviewId
         const reviewMap = {};
-        reviews.forEach(r => {
+        reviews.forEach((r) => {
             reviewMap[r.bookingId.toString()] = r._id;
         });
 
         // 3. Tách reviewed / unreviewed
         const reviewedCourts = bookings
-            .filter(b => reviewMap[b._id.toString()])
-            .map(b => ({
+            .filter((b) => reviewMap[b._id.toString()])
+            .map((b) => ({
                 ...b,
-                reviewId: reviewMap[b._id.toString()] // ⭐ QUAN TRỌNG
+                reviewId: reviewMap[b._id.toString()], // ⭐ QUAN TRỌNG
             }));
 
-        const unreviewedCourts = bookings.filter(
-            b => !reviewMap[b._id.toString()]
-        );
+        const unreviewedCourts = bookings.filter((b) => !reviewMap[b._id.toString()]);
 
         return res.json({
             reviewedCourts,
             unreviewedCourts: {
                 total: unreviewedCourts.length,
-                items: unreviewedCourts
-            }
+                items: unreviewedCourts,
+            },
         });
-
     } catch (err) {
         console.error(err);
-        res.status(500).json({ message: "Server error" });
+        res.status(500).json({ message: 'Server error' });
     }
 };
-
 
 export const getReviewDetail = handleAsync(async (req, res, next) => {
     const { id } = req.params;
 
     const review = await Review.findById(id)
-        .populate("courtId", "_id name type images location")
-        .populate("bookingId", "code date startTime endTime total")
-        .populate("userId", "_id name phone email");
+        .populate('courtId', '_id name type images location')
+        .populate('bookingId', 'code date startTime endTime total')
+        .populate('userId', '_id name phone email');
 
     if (!review) {
-        return next(createError(404, "Không tìm thấy đánh giá"));
+        return next(createError(404, 'Không tìm thấy đánh giá'));
     }
 
-    return res.json(
-        createResponse(true, 200, "Chi tiết đánh giá", review)
-    );
+    return res.json(createResponse(true, 200, 'Chi tiết đánh giá', review));
 });
 
 export const updateReviewStatus = handleAsync(async (req, res, next) => {
     const { id } = req.params;
     const { status } = req.body;
-
-    // validate status
-    if (!["active", "inactive"].includes(status)) {
-        return next(createError(400, "Trạng thái không hợp lệ"));
+    // đúng schema enum: active | hidden
+    if (!['active', 'hidden'].includes(status)) {
+        return next(createError(400, 'Trạng thái không hợp lệ'));
     }
 
-    const review = await Review.findByIdAndUpdate(
-        id,
-        { status },
-        { new: true }
-    )
-        .populate("userId", "name email")
-        .populate("courtId", "name");
+    const review = await Review.findByIdAndUpdate(id, { status }, { new: true })
+        .populate('userId', 'name email phone')
+        .populate('courtId', 'name')
+        .populate('bookingId', 'code date startTime endTime total');
 
-    if (!review) {
-        return next(createError(404, "Không tìm thấy đánh giá"));
-    }
+    if (!review) return next(createError(404, 'Không tìm thấy đánh giá'));
 
-    return res.json(
-        createResponse(true, 200, "Cập nhật trạng thái đánh giá thành công", review)
-    );
+    return res.json(createResponse(true, 200, 'Cập nhật trạng thái đánh giá thành công', review));
 });
