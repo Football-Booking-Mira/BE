@@ -241,6 +241,71 @@ export const getInvoiceByBooking = async (req, res) => {
     }
 };
 
+// --- ADMIN: chỉnh sửa giá sân trong hóa đơn ---
+export const adjustInvoiceFieldPrice = async (req, res) => {
+    try {
+        const invoiceId = req.params.id;
+        const { newFieldAmount } = req.body;
+
+        if (typeof newFieldAmount !== 'number' || Number.isNaN(newFieldAmount) || newFieldAmount < 0) {
+            return res.status(400).json({ success: false, message: 'newFieldAmount không hợp lệ' });
+        }
+
+        const invoice = await InvoiceModel.findById(invoiceId);
+        if (!invoice) return res.status(404).json({ success: false, message: 'Không tìm thấy hóa đơn' });
+
+        const booking = await Booking.findById(invoice.bookingId);
+        if (!booking) return res.status(404).json({ success: false, message: 'Không tìm thấy booking liên quan' });
+
+        // tìm mục tiền sân
+        const fieldItem = await InvoiceItemModel.findOne({ invoiceId: invoice._id, type: 'field' });
+        if (!fieldItem) return res.status(400).json({ success: false, message: 'Hóa đơn không có mục "Tiền sân" để chỉnh sửa' });
+
+        const qty = Number(fieldItem.qty || 1);
+        const newPricePerUnit = Math.round(Number(newFieldAmount) / qty);
+        const newSubtotal = newPricePerUnit * qty;
+        const delta = newSubtotal - Number(fieldItem.subtotal || 0);
+
+        // cập nhật item
+        fieldItem.price = newPricePerUnit;
+        fieldItem.subtotal = newSubtotal;
+        await fieldItem.save();
+
+        // cập nhật tổng hóa đơn
+        invoice.total = Math.max(0, Number(invoice.total || 0) + delta);
+        await invoice.save();
+
+        // cập nhật booking
+        booking.fieldAmount = Number(newFieldAmount);
+        booking.total = Math.max(0, Number(booking.fieldAmount || 0) + Number(booking.equipmentTotal || 0) - Number(booking.discountTotal || 0));
+
+        // đảm bảo depositAmount không vượt quá tổng
+        booking.depositAmount = Math.min(Number(booking.depositAmount || 0), booking.total);
+
+        // cập nhật trạng thái thanh toán
+        if (booking.total > 0 && booking.depositAmount >= booking.total) booking.paymentStatus = 'paid';
+        else if (booking.depositAmount > 0) booking.paymentStatus = 'partial';
+        else booking.paymentStatus = 'unpaid';
+
+        await booking.save();
+
+        const items = await InvoiceItemModel.findFullByInvoice(invoice._id);
+
+        // emit socket để reload
+        const io = req.app.get('io');
+        io?.emit('booking_global_updated');
+        io?.to(String(booking.courtId)).emit('booking_updated', {
+            courtId: String(booking.courtId),
+            date: booking.date.toISOString().slice(0, 10),
+        });
+
+        return res.json({ success: true, message: 'Cập nhật giá sân trong hóa đơn thành công', invoice, items, booking });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 // ------------------------------
 // LẤY DANH SÁCH HÓA ĐƠN
 // ------------------------------
