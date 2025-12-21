@@ -17,9 +17,9 @@ const VoucherUsageSchema = new Schema(
             ref: 'User',
             required: true,
         },
-        bookingId: {
+        orderId: {
             type: ObjectId,
-            ref: 'Booking',
+            ref: 'Order',
             required: true,
             unique: true,
         },

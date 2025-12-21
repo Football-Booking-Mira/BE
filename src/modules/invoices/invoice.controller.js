@@ -203,7 +203,10 @@ export const getInvoiceByBooking = async (req, res) => {
     try {
         const { bookingId } = req.params;
         if (!bookingId) {
-            return res.status(400).json({ success: false, message: 'Thiếu bookingId' });
+            return res.status(400).json({
+                success: false,
+                message: 'Thiếu bookingId',
+            });
         }
 
         const invoice = await InvoiceModel.findOne({ bookingId })
@@ -213,19 +216,15 @@ export const getInvoiceByBooking = async (req, res) => {
                 populate: [
                     { path: 'customerId', model: 'User' },
                     { path: 'courtId', model: 'Court' },
-                    {
-                        path: 'voucherId',
-                        model: 'Voucher',
-                        select: 'code discountType discountValue maxDiscountValue',
-                    },
                 ],
             })
             .populate('customerId');
 
         if (!invoice) {
-            return res
-                .status(404)
-                .json({ success: false, message: 'Không tìm thấy hóa đơn cho đơn này' });
+            return res.status(404).json({
+                success: false,
+                message: 'Không tìm thấy hóa đơn cho đơn này',
+            });
         }
 
         const items = await InvoiceItemModel.findFullByInvoice(invoice._id);
@@ -237,9 +236,13 @@ export const getInvoiceByBooking = async (req, res) => {
         });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({
+            success: false,
+            message: error.message,
+        });
     }
 };
+
 
 // --- ADMIN: chỉnh sửa giá sân trong hóa đơn ---
 export const adjustInvoiceFieldPrice = async (req, res) => {
@@ -329,8 +332,14 @@ export const getInvoiceById = async (req, res) => {
         const { id } = req.params;
 
         const invoice = await InvoiceModel.findById(id)
-            .populate({ path: 'bookingId', populate: { path: 'customerId', model: 'User' } })
-            .populate('customerId');
+  .populate({
+    path: 'bookingId',
+    populate: {
+      path: 'customerId',
+      select: 'name phone email',
+    },
+  })
+  .lean()
 
         if (!invoice) {
             return res.status(404).json({ success: false, message: 'Invoice not found' });
