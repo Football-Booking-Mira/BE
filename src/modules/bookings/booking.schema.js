@@ -40,13 +40,12 @@ export const bookingSchema = z
     .object({
         courtId: z.string().min(1, 'Vui lòng chọn sân!'),
         customerId: z.string().optional(),
-        voucherCode: z.string().trim().optional(),
-        orderId: z.string().optional(), // ✅ THÊM
 
         date: z.string().refine((val) => !isNaN(Date.parse(val)), {
             message: 'Ngày đặt không hợp lệ!',
         }),
 
+        //  giờ tổng: optional (nếu dùng slots)
         startTime: timeStringSchema.optional(),
         endTime: timeStringSchema.optional(),
 
@@ -88,8 +87,15 @@ export const bookingSchema = z
                 email: z.string().trim().email('Email không hợp lệ!'),
             })
             .optional(),
-    })
 
+        voucherCode: z
+            .string()
+            .trim()
+            .min(3, 'Mã voucher tối thiểu 3 ký tự!')
+            .max(30, 'Mã voucher tối đa 30 ký tự!')
+            .regex(/^[A-Za-z0-9_-]+$/, 'Mã voucher chỉ gồm chữ, số, - hoặc _!')
+            .optional(),
+    })
     .superRefine((data, ctx) => {
         // nếu KHÔNG có slots => bắt buộc startTime/endTime và validate
         if (!data.slots || data.slots.length === 0) {

@@ -12,7 +12,6 @@ import voucherRoutes from "../modules/vouchers/voucher.routes.js";
 import routesReport from "../modules/reports/report.routes.js";
 import routerReview from "../modules/review/review.routes.js";
 import contactRouter from "../modules/contacts/contact.routes.js";
-import orderRoutes from "../modules/orders/order.routes.js";
 const routes = Router();
 
 routes.use("/courts", routesCourt);
@@ -28,6 +27,4 @@ routes.use("/vouchers", voucherRoutes);
 routes.use("/review", routerReview);
 routes.use("/reports", routesReport);
 routes.use("/contacts", contactRouter);
-routes.use('/orders', orderRoutes);
-
 export default routes;

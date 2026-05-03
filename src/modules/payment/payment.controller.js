@@ -297,23 +297,57 @@ export const createVnpayPayment = async (req, res, next) => {
 
         //  Commit voucher (chỉ lần đầu, không retry)
         if (!isRetry) {
-    const orderBookings = bookings.filter(b => b.orderId && b.voucherId && b.voucherUsageStatus === 'pending');
-    for (const b of orderBookings) {
-        try {
-            await commitVoucherUsage({
-                voucherId: b.voucherId,
-                orderId: b.orderId,
-                userId: b.customerId,
-                discountAmount: b.voucherDiscount || 0,
-                orderTotal: b.fieldAmount || 0, // hoặc tổng tiền order nếu muốn
-            });
-            b.voucherUsageStatus = 'applied';
-            await b.save();
-        } catch (error) {
-            return res.status(400).json({ success: false, message: 'Không thể áp dụng voucher.' });
+            const committed = [];
+            try {
+                for (const b of bookings) {
+                    if (b.voucherId && b.voucherUsageStatus === 'pending' && b.customerId) {
+                        const usage = await commitVoucherUsage({
+                            voucherId: b.voucherId,
+                            bookingId: b._id,
+                            userId: b.customerId,
+                            // discountAmount
+                            discountAmount: b.voucherDiscount || 0,
+                            // orderTotal: thường voucher tính trên tiền sân
+                            orderTotal: b.fieldAmount || 0,
+                        });
+
+                        b.voucherUsageId = usage._id;
+                        b.voucherUsageStatus = 'applied';
+                        await b.save();
+
+                        committed.push(b);
+                    }
+                }
+            } catch (error) {
+                for (const b of committed) {
+                    try {
+                        await rollbackVoucherUsage(b.voucherId, b.customerId, b._id);
+                        b.voucherUsageStatus = 'pending';
+                        b.voucherUsageId = undefined;
+                        await b.save();
+                    } catch {}
+                }
+
+                const isOutOfUsage =
+                    error.statusCode === 409 ||
+                    error.message?.includes('hết lượt') ||
+                    error.message?.includes('hết lượt sử dụng');
+
+                if (isOutOfUsage) {
+                    return res.status(409).json({
+                        success: false,
+                        message:
+                            'Voucher bạn chọn đã hết lượt sử dụng trong lúc thanh toán. Vui lòng chọn voucher khác.',
+                        code: 'VOUCHER_OUT_OF_STOCK',
+                    });
+                }
+
+                return res.status(400).json({
+                    success: false,
+                    message: error.message || 'Không thể áp dụng voucher. Vui lòng thử lại.',
+                });
+            }
         }
-    }
-}
 
         //  VNPay params
         const bookingCodesStr = bookings

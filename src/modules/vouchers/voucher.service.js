@@ -223,7 +223,7 @@ export const validateVoucherForOrder = async ({
 
 export const commitVoucherUsage = async ({
     voucherId,
-    orderId,
+    bookingId,
     userId,
     discountAmount,
     orderTotal,
@@ -241,7 +241,7 @@ export const commitVoucherUsage = async ({
     const usage = await VoucherUsage.create({
         voucherId,
         userId,
-        orderId,
+        bookingId,
         discountAmount,
         orderTotal,
         status: 'applied',
