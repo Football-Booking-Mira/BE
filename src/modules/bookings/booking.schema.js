@@ -65,6 +65,7 @@ export const bookingSchema = z
                 PAYMENT_METHOD.MOMO,
                 PAYMENT_METHOD.CASH,
                 PAYMENT_METHOD.TRANSFER,
+                PAYMENT_METHOD.ZALOPAY,
             ],
             { required_error: 'Vui lòng chọn phương thức thanh toán!' }
         ),
