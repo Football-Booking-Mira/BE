@@ -59,6 +59,7 @@ export const PAYMENT_METHOD = {
     CASH: 'cash', //Tiền mặt
     TRANSFER: 'transfer', //chuyển khoản
     VNPAY: 'vnpay',
+    ZALOPAY: 'zalopay', // Thêm ZaloPay thủ công
 };
 export const ITEM_TYPE = {
     FIELD: 'field', //sân
