@@ -526,7 +526,7 @@ export const createBooking = handleAsync(async (req, res, next) => {
         isOffline === true || isOffline === 'true' || roleFromToken === USER_ROLES.ADMIN;
 
     const isOnlineMode =
-        !isOfflineMode && [PAYMENT_METHOD.VNPAY, PAYMENT_METHOD.MOMO].includes(paymentMethod);
+        !isOfflineMode && [PAYMENT_METHOD.VNPAY, PAYMENT_METHOD.MOMO, PAYMENT_METHOD.ZALOPAY].includes(paymentMethod);
 
     const createdBy = isOfflineMode ? USER_ROLES.ADMIN : roleFromToken;
 
@@ -708,7 +708,7 @@ export const createBooking = handleAsync(async (req, res, next) => {
     const initialStatus = isOfflineMode ? BOOKING_STATUS.CONFIRMED : BOOKING_STATUS.PENDING;
 
     let autoCancelAt = null;
-    if (!isOfflineMode && [PAYMENT_METHOD.VNPAY, PAYMENT_METHOD.MOMO].includes(paymentMethod)) {
+    if (!isOfflineMode && [PAYMENT_METHOD.VNPAY, PAYMENT_METHOD.MOMO, PAYMENT_METHOD.ZALOPAY].includes(paymentMethod)) {
         const expireMinutes = 5;
         autoCancelAt = new Date(Date.now() + expireMinutes * 60 * 1000);
     }
@@ -930,8 +930,8 @@ export const createBooking = handleAsync(async (req, res, next) => {
         createdBookings.push(booking);
     }
 
-    // TẠO ORDER GỘP CHO ONLINE NHIỀU BOOKING
-    if (createdBookings.length > 1 && isOnlineMode) {
+    // TẠO ORDER GỘP CHO NHIỀU BOOKING (để UI gộp chung một nhóm)
+    if (createdBookings.length > 1) {
         const totalOrderAmount = createdBookings.reduce((sum, b) => sum + Number(b.total || 0), 0);
 
         const order = await Order.create({

@@ -24,6 +24,14 @@ import {
 
 import { commitVoucherUsage, rollbackVoucherUsage } from '../vouchers/voucher.service.js';
 
+// --- Cấu hình ZaloPay Sandbox (mặc định) ---
+const ZALOPAY_CONFIG = {
+  app_id: "2553",
+  key1: "PcY4iZIKFCIdgZvA6ueMcMHHUbRLYjPL",
+  key2: "kLtgPl8YESDkOklk1AOWG7aP8TAlA1hL",
+  endpoint: "https://sb-openapi.zalopay.vn/v2/create"
+};
+
 // Tỉ lệ cọc so với TỔNG (field + equipment - discount)
 // 1 = thanh toán FULL
 const DEPOSIT_RATE = 1;
@@ -641,6 +649,231 @@ export const vnpayReturn = async (req, res, next) => {
         }
 
         const queryParams = { ...req.query, status: rspCode };
+        const query = new URLSearchParams(queryParams).toString();
+        return res.redirect(`${FRONT_END_URL}/payment-return?${query}`);
+    } catch (err) {
+        next(err);
+    }
+};
+
+// ============================================
+// ============ ZALOPAY INTEGRATION ===========
+// ============================================
+
+export const createZalopayPayment = async (req, res, next) => {
+    try {
+        const { amount, bookingIds, returnUrl } = req.body;
+        
+        if (!bookingIds || !amount) {
+            return res.status(400).json({ success: false, message: 'Thiếu thông tin đơn hàng.' });
+        }
+        
+        const ids = Array.isArray(bookingIds) ? bookingIds.join(',') : bookingIds;
+        
+        const transID = Math.floor(Math.random() * 1000000);
+        const yymmdd = new Date().toISOString().slice(2,10).replace(/-/g, '');
+        
+        const backendReturnUrl = `${req.protocol}://${req.get('host')}/api/payment/zalopay/return?bookingIds=${ids}`;
+        
+        const embed_data = {
+            redirecturl: backendReturnUrl
+        };
+        const items = [{}];
+        
+        const order = {
+            app_id: ZALOPAY_CONFIG.app_id,
+            app_trans_id: `${yymmdd}_${transID}`,
+            app_user: "customer",
+            app_time: Date.now(),
+            item: JSON.stringify(items),
+            embed_data: JSON.stringify(embed_data),
+            amount: amount,
+            description: `Thanh toan dat san #${transID}`,
+            bank_code: "",
+        };
+
+        const data = ZALOPAY_CONFIG.app_id + "|" + order.app_trans_id + "|" + order.app_user + "|" + order.amount + "|" + order.app_time + "|" + order.embed_data + "|" + order.item;
+        order.mac = crypto.createHmac('sha256', ZALOPAY_CONFIG.key1).update(data).digest('hex');
+
+        const postData = qs.stringify(order);
+
+        const response = await fetch(ZALOPAY_CONFIG.endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: postData
+        });
+        
+        const result = await response.json();
+        
+        if (result.return_code === 1) {
+            return res.status(200).json({ success: true, paymentUrl: result.order_url });
+        } else {
+            return res.status(400).json({ success: false, message: 'Lỗi ZaloPay: ' + result.return_message });
+        }
+    } catch (err) {
+        next(err);
+    }
+};
+
+export const zalopayReturn = async (req, res, next) => {
+    try {
+        // ZaloPay redirecturl appends: ?appid=2553&apptransid=...&pmcid=38&bankcode=...&amount=50000&status=1
+        // kèm query parameters custom của mình: ?bookingIds=...
+        const { status, bookingIds, amount, apptransid } = req.query;
+        
+        const isSuccess = String(status) === '1'; // 1 là thành công, các mã khác là lỗi/huỷ
+        const paidAmount = Number(amount || 0);
+        
+        if (!bookingIds) {
+            return res.redirect(`${FRONT_END_URL}/payment-return?status=notfound`);
+        }
+        
+        const idsArray = String(bookingIds).split(',').map(id => id.trim()).filter(isValidObjectId);
+        if (!idsArray.length) {
+            return res.redirect(`${FRONT_END_URL}/payment-return?status=notfound`);
+        }
+        
+        const bookings = await Booking.find({ _id: { $in: idsArray } });
+        if (!bookings.length) {
+            return res.redirect(`${FRONT_END_URL}/payment-return?status=notfound`);
+        }
+        
+        const invCount = await InvoiceModel.countDocuments({ bookingId: { $in: idsArray } });
+        const equipmentMap = await buildEquipmentMap(bookings.map((b) => b._id));
+        
+        for (const b of bookings) {
+            const newTotal = calcBookingTotal(b, equipmentMap);
+            const eqAgg = equipmentMap.get(String(b._id)) || 0;
+            const eqStored = safeNum(b.equipmentTotal);
+            const eqTotal = Math.max(eqAgg, eqStored);
+
+            if (safeNum(b.equipmentTotal) !== eqTotal || safeNum(b.total) !== newTotal) {
+                b.equipmentTotal = eqTotal;
+                b.total = newTotal;
+                await b.save().catch(() => {});
+            }
+        }
+        
+        if (isSuccess && paidAmount > 0 && invCount === 0) {
+            if (bookings.length > 1) {
+                let remaining = paidAmount;
+                const sortedBookings = [...bookings].sort(
+                    (a, b) => new Date(a.date || a.createdAt).getTime() - new Date(b.date || b.createdAt).getTime()
+                );
+
+                for (const b of sortedBookings) {
+                    if (remaining <= 0) break;
+                    const total = safeNum(b.total) > 0 ? safeNum(b.total) : calcBookingTotal(b, equipmentMap);
+                    if (!total) continue;
+
+                    const currentDeposit = b.depositStatus === DEPOSIT_STATUS.PAID ? safeNum(b.depositAmount) : 0;
+                    const need = Math.max(0, total - currentDeposit);
+                    
+                    if (need <= 0) {
+                        b.paymentStatus = PAYMENT_STATUS.PAID;
+                        b.depositStatus = DEPOSIT_STATUS.PAID;
+                        b.depositMethod = PAYMENT_METHOD.ZALOPAY;
+                        b.autoCancelAt = null;
+                        await b.save().catch(() => {});
+                        continue;
+                    }
+
+                    const add = Math.min(need, remaining);
+                    const newDeposit = currentDeposit + add;
+
+                    b.depositAmount = newDeposit;
+                    b.depositMethod = PAYMENT_METHOD.ZALOPAY;
+                    if (newDeposit > 0) b.depositStatus = DEPOSIT_STATUS.PAID;
+
+                    if (newDeposit >= total) b.paymentStatus = PAYMENT_STATUS.PAID;
+                    else if (newDeposit > 0) b.paymentStatus = PAYMENT_STATUS.PARTIAL;
+                    else b.paymentStatus = PAYMENT_STATUS.UNPAID;
+
+                    b.autoCancelAt = null;
+
+                    if (b.status === BOOKING_STATUS.CANCELLED && String(b.cancelReason || '').toLowerCase().includes('vnpay')) {
+                        b.status = BOOKING_STATUS.PENDING;
+                        b.cancelBy = undefined;
+                        b.cancelReason = undefined;
+                        b.cancelledAt = undefined;
+                    }
+                    await b.save().catch(() => {});
+                    remaining -= add;
+                }
+            } else {
+                const booking = bookings[0];
+                const total = safeNum(booking.total) > 0 ? safeNum(booking.total) : calcBookingTotal(booking, equipmentMap);
+                const currentDeposit = booking.depositStatus === DEPOSIT_STATUS.PAID ? safeNum(booking.depositAmount) : 0;
+
+                const need = Math.max(0, total - currentDeposit);
+                const add = Math.min(need, paidAmount);
+                const newDeposit = currentDeposit + add;
+
+                booking.depositAmount = newDeposit;
+                booking.depositMethod = PAYMENT_METHOD.ZALOPAY;
+                booking.depositStatus = newDeposit > 0 ? DEPOSIT_STATUS.PAID : DEPOSIT_STATUS.PENDING;
+
+                if (total > 0 && newDeposit >= total) booking.paymentStatus = PAYMENT_STATUS.PAID;
+                else if (newDeposit > 0) booking.paymentStatus = PAYMENT_STATUS.PARTIAL;
+                else booking.paymentStatus = PAYMENT_STATUS.UNPAID;
+
+                booking.autoCancelAt = null;
+
+                if (booking.status === BOOKING_STATUS.CANCELLED && String(booking.cancelReason || '').toLowerCase().includes('vnpay')) {
+                    booking.status = BOOKING_STATUS.PENDING;
+                    booking.cancelBy = undefined;
+                    booking.cancelReason = undefined;
+                    booking.cancelledAt = undefined;
+                }
+
+                await booking.save().catch(() => {});
+            }
+        } else if (!isSuccess) {
+            // FAIL OR CANCEL
+            for (const b of bookings) {
+                if (b.voucherId && b.voucherUsageStatus === 'applied' && b.voucherUsageId && b.customerId) {
+                    try {
+                        await rollbackVoucherUsage(b.voucherId, b.customerId, b._id);
+                        b.voucherUsageStatus = 'pending';
+                        b.voucherUsageId = undefined;
+                        b.voucherRestoredAt = new Date();
+                    } catch (error) {
+                        console.error('❌ Lỗi khi rollback voucher:', error.message);
+                    }
+                }
+
+                if (b.status === BOOKING_STATUS.CANCELLED && String(b.cancelReason || '').toLowerCase().includes('vnpay')) {
+                    b.status = BOOKING_STATUS.PENDING;
+                    b.cancelBy = undefined;
+                    b.cancelReason = undefined;
+                    b.cancelledAt = undefined;
+                }
+
+                const dep = safeNum(b.depositAmount);
+                if (dep > 0) b.paymentStatus = PAYMENT_STATUS.PARTIAL;
+                else b.paymentStatus = PAYMENT_STATUS.UNPAID;
+
+                b.paymentFailReason = `ZaloPay fail/cancel. Status=${status}`;
+                b.paymentFailAt = new Date();
+
+                await b.save().catch(() => {});
+            }
+        }
+
+        const io = req.app.get('io');
+        io?.emit('booking_global_updated');
+
+        for (const b of bookings) {
+            const d = b?.date ? new Date(b.date) : null;
+            io?.to(String(b.courtId)).emit('booking_updated', {
+                courtId: String(b.courtId),
+                date: d ? d.toISOString().slice(0, 10) : undefined,
+            });
+        }
+
+        const queryParams = { ...req.query, method: 'zalopay', status: isSuccess ? '00' : 'fail', orderId: apptransid };
         const query = new URLSearchParams(queryParams).toString();
         return res.redirect(`${FRONT_END_URL}/payment-return?${query}`);
     } catch (err) {

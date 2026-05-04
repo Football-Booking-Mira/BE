@@ -165,6 +165,10 @@ routesBooking.post('/payment/vietqr', authenticate, async (req, res) => {
                 qrImageBase64: data.data.qrDataURL,
                 qrString: data.data.qrString,
                 amount,
+                accountNo: '0302733686666',
+                accountName: 'Nguyen Tien Manh',
+                bankName: 'MB Bank',
+                addInfo: `Thanh toan booking ${bookingId}`,
             },
         });
     } catch (e) {
