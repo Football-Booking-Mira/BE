@@ -165,7 +165,7 @@ const calcPaidDeposit = (b) =>
 
 const isOnlineMethod = (m) => {
     const method = String(m || '').toLowerCase();
-    return [PAYMENT_METHOD.VNPAY, PAYMENT_METHOD.MOMO].includes(method);
+    return [PAYMENT_METHOD.VNPAY, PAYMENT_METHOD.MOMO, PAYMENT_METHOD.ZALOPAY].includes(method);
 };
 
 //  TẠO THANH TOÁN VNPAY
