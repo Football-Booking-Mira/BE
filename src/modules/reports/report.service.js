@@ -54,136 +54,137 @@ import Booking from "../../modules/bookings/booking.models.js";
 import { Court } from "../../modules/courts/court.models.js";
 
 // ✅ Named export đúng theo style của bạn
-export const getBookingStatsService = async() => {
+export const getBookingStatsService = async({ period = 'week', offset = '0' } = {}) => {
+    const now = new Date();
+    
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - now.getDay());
+    startOfWeek.setHours(0,0,0,0);
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    // 1️⃣ Khung giờ hot nhất theo range (from–to)
-    const hotHourAgg = await Booking.aggregate([
-        { $match: { isDeleted: false } },
-        {
-            $group: {
-                _id: { from: "$startTime", to: "$endTime" }, // gom nhóm theo khoảng giờ
-                count: { $sum: 1 }
+    const allBookings = await Booking.find({ isDeleted: false }).lean();
+    
+    let dailyRevenue = 0;
+    let totalPaid = 0;
+    let totalUnpaid = 0;
+    let bookingsToday = 0;
+    let bookingsWeek = 0;
+    let bookingsMonth = 0;
+    
+    const courtsMap = {};
+    const customersMap = {};
+    const peakHoursMap = {};
+    let inUse = 0;
+    let reserved = 0;
+    const revenueByDate = {};
+
+    for (const b of allBookings) {
+        // Dùng b.date (Ngày khách đến đá) làm mốc thời gian chính. Nếu không có thì fallback createdAt
+        const targetDate = new Date(b.date || b.createdAt);
+        
+        // Tạo chuỗi YYYY-MM-DD theo giờ local (VN) để biểu đồ gom nhóm chính xác
+        const dateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
+        
+        // Revenue
+        const amount = b.total || 0;
+        if (b.paymentStatus === 'paid') { // Khi admin bấm thanh toán -> paymentStatus = 'paid'
+            totalPaid += amount;
+            if (targetDate >= startOfToday) dailyRevenue += amount;
+            
+            revenueByDate[dateStr] = (revenueByDate[dateStr] || 0) + amount;
+        } else {
+            totalUnpaid += amount;
+        }
+        
+        // Bookings overview
+        if (targetDate >= startOfToday) bookingsToday++;
+        if (targetDate >= startOfWeek) bookingsWeek++;
+        if (targetDate >= startOfMonth) bookingsMonth++;
+        
+        // Courts stats
+        if (b.courtId) {
+            courtsMap[b.courtId] = (courtsMap[b.courtId] || 0) + 1;
+        }
+        
+        // Customers stats
+        if (b.customerInfo && b.customerInfo.phone) {
+            const phone = b.customerInfo.phone;
+            if (!customersMap[phone]) {
+                customersMap[phone] = { user: b.customerInfo, count: 0, firstDate: targetDate };
             }
-        },
-        { $sort: { count: -1 } },
-        { $limit: 1 }
-    ]);
-
-    const hotHour = hotHourAgg[0] ? {
-        fromHour: hotHourAgg[0]._id.from,
-        toHour: hotHourAgg[0]._id.to,
-        count: hotHourAgg[0].count
-    } : null;
-
-    // 2️⃣ Khách đặt nhiều nhất (Top 1)
-    const topCustomerAgg = await Booking.aggregate([
-        { $match: { isDeleted: false, customerInfo: { $ne: null } } },
-        {
-            $group: {
-                _id: "$customerInfo.phone",
-                count: { $sum: 1 },
-                user: { $first: "$customerInfo" }
+            customersMap[phone].count++;
+            if (targetDate < customersMap[phone].firstDate) {
+                customersMap[phone].firstDate = targetDate;
             }
-        },
-        { $sort: { count: -1 } },
-        { $limit: 1 }
-    ]);
-
-    const topCustomer = topCustomerAgg[0] ? {
-        user: topCustomerAgg[0].user,
-        count: topCustomerAgg[0].count
-    } : null;
-
-    // 3️⃣ Top 4 khách đặt nhiều nhất
-    const top4CustomersAgg = await Booking.aggregate([
-        { $match: { isDeleted: false, customerInfo: { $ne: null } } },
-        {
-            $group: {
-                _id: "$customerInfo.phone",
-                count: { $sum: 1 },
-                user: { $first: "$customerInfo" }
-            }
-        },
-        { $sort: { count: -1 } },
-        { $limit: 4 }
-    ]);
-
-    const topCustomersList = top4CustomersAgg.map(i => ({
-        user: i.user,
-        count: i.count
-    }));
-
-    // 4️⃣ Sân đặt nhiều nhất
-    const topCourtAgg = await Booking.aggregate([
-        { $match: { isDeleted: false } },
-        { $group: { _id: "$courtId", count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: 1 }
-    ]);
-
-    let topCourt = null;
-    if (topCourtAgg[0]) {
-        const court = await Court.findById(topCourtAgg[0]._id).lean();
-        topCourt = { court, count: topCourtAgg[0].count };
+        }
+        
+        // Peak hours
+        if (b.startTime) {
+            peakHoursMap[b.startTime] = (peakHoursMap[b.startTime] || 0) + 1;
+        }
+        
+        // Court status
+        if (b.status === 'in_use') inUse++;
+        else if (b.status === 'pending' || b.status === 'confirmed') reserved++;
     }
 
-    // 5️⃣ Doanh thu 7 ngày gần nhất (FIX đúng biến sử dụng)
-    const revenue7DaysAgg = await Booking.aggregate([
-        { $match: { isDeleted: false } },
-        {
-            $group: {
-                _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-                revenue: { $sum: { $toDouble: "$price" } } // ✅ ép kiểu sang number
-            }
-        },
-        { $sort: { _id: -1 } },
-        { $limit: 7 },
-        { $sort: { _id: 1 } }
-    ]);
+    // Process Courts Stats
+    const courtIds = Object.keys(courtsMap);
+    const courtsData = await Court.find({ _id: { $in: courtIds } }).lean();
+    const courtNameMap = {};
+    courtsData.forEach(c => courtNameMap[c._id.toString()] = c.name);
+    
+    const courtsStats = courtIds.map(id => ({
+        name: courtNameMap[id] || 'Sân không xác định',
+        count: courtsMap[id]
+    })).sort((a, b) => b.count - a.count);
 
-    const totalRevenue = revenue7DaysAgg.reduce((sum, i) => sum + i.revenue, 0);
+    // Process Customer Stats
+    const customers = Object.values(customersMap);
+    const newThisMonth = customers.filter(c => c.firstDate >= startOfMonth).length;
+    const topList = customers.sort((a, b) => b.count - a.count).slice(0, 5);
 
+    // Process Peak Hours
+    const peakHours = Object.keys(peakHoursMap).map(time => ({
+        time,
+        count: peakHoursMap[time]
+    })).sort((a, b) => b.count - a.count);
 
-    const revenueTrend = revenue7DaysAgg.map(i => ({
-        date: i._id,
-        revenue: i.revenue
-    }));
-
-    // 6️⃣ Tỷ lệ sử dụng sân (%)
-    const totalUsed = await Booking.countDocuments({ isDeleted: false });
+    // Court Status available
     const totalCourts = await Court.countDocuments();
+    const available = Math.max(0, totalCourts - inUse - reserved);
 
-    const courtRate = totalUsed && totalCourts ?
-        Number(((totalUsed / (totalCourts * 10)) * 100).toFixed(1)) :
-        0;
-
-    // 7️⃣ Trend lượt đặt theo 7 ngày gần nhất
-    const booking7DaysAgg = await Booking.aggregate([
-        { $match: { isDeleted: false } },
-        {
-            $group: {
-                _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-                count: { $sum: 1 }
-            }
-        },
-        { $sort: { _id: -1 } },
-        { $limit: 7 },
-        { $sort: { _id: 1 } }
-    ]);
-
-    const bookingTrend = booking7DaysAgg.map(i => ({
-        date: i._id,
-        count: i.count
-    }));
+    // Revenue Trend
+    const revenueTrend = Object.keys(revenueByDate).map(date => ({
+        date,
+        revenue: revenueByDate[date]
+    })).sort((a, b) => new Date(a.date) - new Date(b.date)).slice(-7);
 
     return {
-        hotHour,
-        topCustomer,
-        topCourt,
+        revenueOverview: {
+            daily: dailyRevenue,
+            totalPaid,
+            totalUnpaid
+        },
+        bookingsOverview: {
+            today: bookingsToday,
+            week: bookingsWeek,
+            month: bookingsMonth
+        },
+        courtsStats,
+        customerStats: {
+            total: customers.length,
+            newThisMonth,
+            topList
+        },
+        peakHours,
+        courtStatus: {
+            inUse,
+            reserved,
+            available
+        },
         revenueTrend,
-        totalRevenue,
-        topCustomersList: topCustomersList,
-        courtRate,
-        hourTrend: bookingTrend // giữ đúng format cho FE
+        totalRevenue: totalPaid
     };
 };

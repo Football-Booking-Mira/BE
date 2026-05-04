@@ -7,11 +7,9 @@ import { getBookingStatsService } from "./report.service.js";
  * 📊 Controller trả về thống kê booking
  */
 export const bookingStats = handleAsync(async(req, res) => {
-    const result = await getBookingStatsService();
+    const { period, offset } = req.query;
+    const result = await getBookingStatsService({ period, offset });
     return res.json(
-        createResponse(true, 200, "Lấy thống kê booking thành công!", {
-            ...result,
-            totalRevenue: result.totalRevenue // ✅ expose lên FE
-        })
+        createResponse(true, 200, "Lấy thống kê booking thành công!", result)
     );
 });
