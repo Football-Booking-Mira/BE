@@ -522,6 +522,11 @@ export const createBooking = handleAsync(async (req, res, next) => {
 
     const roleFromToken = (req.user?.role || USER_ROLES.USER).toLowerCase();
 
+    // Admin chỉ được tạo booking qua trang admin (isOffline = true)
+    if (roleFromToken === USER_ROLES.ADMIN && isOffline !== true && isOffline !== 'true') {
+        return next(createError(403, 'Tài khoản quản trị không thể đặt sân ở trang khách hàng. Vui lòng sử dụng trang quản trị để tạo đơn đặt sân!'));
+    }
+
     const isOfflineMode =
         isOffline === true || isOffline === 'true' || roleFromToken === USER_ROLES.ADMIN;
 
