@@ -262,7 +262,7 @@ export const createVnpayPayment = async (req, res, next) => {
         for (const b of bookings) {
             const newTotal = calcBookingTotal(b, equipmentMap);
 
-            const eqAgg = equipmentMap.get(String(b._id)) || 0;
+            const eqAgg = equipmentMap.get?.(String(b._id)) || 0;
             const eqStored = safeNum(b.equipmentTotal);
             const eqTotal = Math.max(eqAgg, eqStored);
 
@@ -470,7 +470,7 @@ export const vnpayReturn = async (req, res, next) => {
         const equipmentMap = await buildEquipmentMap(bookings.map((b) => b._id));
         for (const b of bookings) {
             const newTotal = calcBookingTotal(b, equipmentMap);
-            const eqAgg = equipmentMap.get(String(b._id)) || 0;
+            const eqAgg = equipmentMap.get?.(String(b._id)) || 0;
             const eqStored = safeNum(b.equipmentTotal);
             const eqTotal = Math.max(eqAgg, eqStored);
 
@@ -745,7 +745,7 @@ export const zalopayReturn = async (req, res, next) => {
         
         for (const b of bookings) {
             const newTotal = calcBookingTotal(b, equipmentMap);
-            const eqAgg = equipmentMap.get(String(b._id)) || 0;
+            const eqAgg = equipmentMap.get?.(String(b._id)) || 0;
             const eqStored = safeNum(b.equipmentTotal);
             const eqTotal = Math.max(eqAgg, eqStored);
 

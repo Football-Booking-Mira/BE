@@ -3,73 +3,57 @@ import { USER_ROLES } from '../../common/constants/enums.js';
 import { authenticate, authorize } from '../../common/middlewares/auth.middleware.js';
 import validBodyRequest from '../../common/middlewares/validBodyRequest.js';
 import {
-    createVoucher,
-    deleteVoucher,
-    getPublicVouchers,
-    getVoucherById,
-    getVoucherStats,
-    getVouchers,
-    getVouchersDebug,
-    updateVoucher,
-    validateVoucher,
+    createVoucher, deleteVoucher, getPublicVouchers, getVoucherById,
+    getVoucherStats, getVouchers, getVouchersDebug, updateVoucher, validateVoucher,
 } from './voucher.controller.js';
 import { voucherSchema } from './voucher.schema.js';
 import { voucherApplySchema } from './voucherApply.schema.js';
 
 const voucherRoutes = Router();
-
-// Public route - Không cần đăng nhập
-voucherRoutes.get('/public', getPublicVouchers);
-
-// Debug route - Xem tất cả voucher để debug (tạm thời, có thể xóa sau)
-voucherRoutes.get('/debug', getVouchersDebug);
-
-// Admin routes - Cần đăng nhập và quyền ADMIN
-voucherRoutes.get('/', authenticate, authorize(USER_ROLES.ADMIN), getVouchers);
-
-voucherRoutes.post(
-    '/',
-    authenticate,
-    authorize(USER_ROLES.ADMIN),
-    validBodyRequest(voucherSchema),
-    createVoucher
+voucherRoutes.get('/public',
+    // #swagger.tags = ['Vouchers']
+    // #swagger.summary = 'Lấy danh sách voucher công khai'
+    getPublicVouchers
 );
-
-voucherRoutes.post(
-    '/validate',
-    authenticate,
-    validBodyRequest(voucherApplySchema),
-    validateVoucher
+voucherRoutes.get('/debug',
+    // #swagger.tags = ['Vouchers']
+    // #swagger.summary = 'Lấy danh sách voucher (debug)'
+    getVouchersDebug
 );
-
-voucherRoutes.get(
-    '/:voucherId/stats',
-    authenticate,
-    authorize(USER_ROLES.ADMIN),
-    getVoucherStats
+voucherRoutes.get('/',
+    // #swagger.tags = ['Vouchers']
+    // #swagger.summary = 'Lấy danh sách voucher (admin)'
+    authenticate, authorize(USER_ROLES.ADMIN), getVouchers
 );
-
-voucherRoutes.get(
-    '/:voucherId',
-    authenticate,
-    authorize(USER_ROLES.ADMIN),
-    getVoucherById
+voucherRoutes.post('/',
+    // #swagger.tags = ['Vouchers']
+    // #swagger.summary = 'Tạo voucher mới'
+    authenticate, authorize(USER_ROLES.ADMIN), validBodyRequest(voucherSchema), createVoucher
 );
-
-voucherRoutes.put(
-    '/:voucherId',
-    authenticate,
-    authorize(USER_ROLES.ADMIN),
-    validBodyRequest(voucherSchema),
-    updateVoucher
+voucherRoutes.post('/validate',
+    // #swagger.tags = ['Vouchers']
+    // #swagger.summary = 'Kiểm tra và áp dụng voucher'
+    authenticate, validBodyRequest(voucherApplySchema), validateVoucher
 );
-
-voucherRoutes.delete(
-    '/:voucherId',
-    authenticate,
-    authorize(USER_ROLES.ADMIN),
-    deleteVoucher
+voucherRoutes.get('/:voucherId/stats',
+    // #swagger.tags = ['Vouchers']
+    // #swagger.summary = 'Lấy thống kê voucher'
+    authenticate, authorize(USER_ROLES.ADMIN), getVoucherStats
+);
+voucherRoutes.get('/:voucherId',
+    // #swagger.tags = ['Vouchers']
+    // #swagger.summary = 'Lấy chi tiết voucher theo ID'
+    authenticate, authorize(USER_ROLES.ADMIN), getVoucherById
+);
+voucherRoutes.put('/:voucherId',
+    // #swagger.tags = ['Vouchers']
+    // #swagger.summary = 'Cập nhật voucher'
+    authenticate, authorize(USER_ROLES.ADMIN), validBodyRequest(voucherSchema), updateVoucher
+);
+voucherRoutes.delete('/:voucherId',
+    // #swagger.tags = ['Vouchers']
+    // #swagger.summary = 'Xóa voucher'
+    authenticate, authorize(USER_ROLES.ADMIN), deleteVoucher
 );
 
 export default voucherRoutes;
-

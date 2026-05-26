@@ -1,12 +1,70 @@
 {
   "swagger": "2.0",
   "info": {
-    "title": "Backend API",
-    "description": "API By Trịnh Quốc Hùng",
+    "title": "MIRA Football - Backend API",
+    "description": "API hệ thống đặt sân bóng đá MIRA Football - By Trịnh Quốc Hùng",
     "version": "1.0.0"
   },
   "host": "localhost:3000",
   "basePath": "/api",
+  "tags": [
+    {
+      "name": "Auth",
+      "description": "Xác thực: Đăng nhập, Đăng ký, Quên mật khẩu"
+    },
+    {
+      "name": "Users",
+      "description": "Quản lý người dùng"
+    },
+    {
+      "name": "Courts",
+      "description": "Quản lý sân bóng"
+    },
+    {
+      "name": "Bookings",
+      "description": "Quản lý đặt sân"
+    },
+    {
+      "name": "BookingItems",
+      "description": "Chi tiết từng item trong đơn đặt sân"
+    },
+    {
+      "name": "Equipments",
+      "description": "Quản lý thiết bị (thuê/bán)"
+    },
+    {
+      "name": "Payment",
+      "description": "Thanh toán VNPay & ZaloPay"
+    },
+    {
+      "name": "Invoices",
+      "description": "Quản lý hóa đơn"
+    },
+    {
+      "name": "Vouchers",
+      "description": "Quản lý mã giảm giá"
+    },
+    {
+      "name": "Reviews",
+      "description": "Đánh giá sân bóng"
+    },
+    {
+      "name": "Reports",
+      "description": "Thống kê & Báo cáo"
+    },
+    {
+      "name": "Contacts",
+      "description": "Liên hệ & Phản hồi"
+    },
+    {
+      "name": "Chat",
+      "description": "AI Chatbot tư vấn"
+    },
+    {
+      "name": "Upload",
+      "description": "Upload hình ảnh"
+    }
+  ],
   "schemes": [
     "http",
     "https"
@@ -27,6 +85,10 @@
   "paths": {
     "/courts/": {
       "get": {
+        "tags": [
+          "Courts"
+        ],
+        "summary": "Lấy danh sách tất cả sân bóng",
         "description": "",
         "parameters": [
           {
@@ -52,6 +114,10 @@
         }
       },
       "post": {
+        "tags": [
+          "Courts"
+        ],
+        "summary": "Tạo sân mới",
         "description": "",
         "parameters": [
           {
@@ -76,6 +142,10 @@
     },
     "/courts/search": {
       "get": {
+        "tags": [
+          "Courts"
+        ],
+        "summary": "Tìm kiếm sân theo tên hoặc giá",
         "description": "",
         "parameters": [
           {
@@ -106,6 +176,10 @@
     },
     "/courts/{id}": {
       "get": {
+        "tags": [
+          "Courts"
+        ],
+        "summary": "Lấy chi tiết sân theo ID",
         "description": "",
         "parameters": [
           {
@@ -122,6 +196,10 @@
         }
       },
       "delete": {
+        "tags": [
+          "Courts"
+        ],
+        "summary": "Xóa sân theo ID",
         "description": "",
         "parameters": [
           {
@@ -138,6 +216,10 @@
         }
       },
       "patch": {
+        "tags": [
+          "Courts"
+        ],
+        "summary": "Cập nhật thông tin sân",
         "description": "",
         "parameters": [
           {
@@ -186,6 +268,10 @@
     },
     "/courts/soft-delete/{id}": {
       "delete": {
+        "tags": [
+          "Courts"
+        ],
+        "summary": "Xóa mềm sân theo ID",
         "description": "",
         "parameters": [
           {
@@ -204,6 +290,10 @@
     },
     "/courts/maintenance/{id}": {
       "patch": {
+        "tags": [
+          "Courts"
+        ],
+        "summary": "Cập nhật trạng thái bảo trì sân",
         "description": "",
         "parameters": [
           {
@@ -221,64 +311,39 @@
       }
     },
     "/bookings/": {
-      "get": {
+      "post": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Tạo đơn đặt sân mới",
         "description": "",
         "responses": {
-          "200": {
-            "description": "OK"
-          },
           "401": {
             "description": "Unauthorized"
           }
         }
       },
-      "post": {
-        "description": "",
-        "parameters": [
-          {
-            "name": "body",
-            "in": "body",
-            "schema": {
-              "type": "object",
-              "properties": {
-                "courtId": {
-                  "example": "any"
-                },
-                "customerId": {
-                  "example": "any"
-                },
-                "date": {
-                  "example": "any"
-                },
-                "startTime": {
-                  "example": "any"
-                },
-                "endTime": {
-                  "example": "any"
-                },
-                "paymentMethod": {
-                  "example": "any"
-                },
-                "note": {
-                  "example": "any"
-                },
-                "isOffline": {
-                  "example": "any"
-                },
-                "customerInfo": {
-                  "example": "any"
-                },
-                "paidAtCreation": {
-                  "example": "any"
-                }
-              }
-            }
-          }
+      "get": {
+        "tags": [
+          "Bookings"
         ],
+        "summary": "Lấy danh sách đơn đặt sân",
+        "description": "",
         "responses": {
-          "201": {
-            "description": "Created"
-          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/bookings/multi": {
+      "post": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Tạo nhiều đơn đặt sân cùng lúc",
+        "description": "",
+        "responses": {
           "401": {
             "description": "Unauthorized"
           }
@@ -287,6 +352,10 @@
     },
     "/bookings/user/{userId}": {
       "get": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Lấy danh sách đơn đặt sân theo người dùng",
         "description": "",
         "parameters": [
           {
@@ -297,9 +366,6 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK"
-          },
           "401": {
             "description": "Unauthorized"
           }
@@ -308,6 +374,10 @@
     },
     "/bookings/court/{courtId}": {
       "get": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Lấy danh sách đơn đặt sân theo sân",
         "description": "",
         "parameters": [
           {
@@ -315,59 +385,49 @@
             "in": "path",
             "required": true,
             "type": "string"
-          },
-          {
-            "name": "startDate",
-            "in": "query",
-            "type": "string"
-          },
-          {
-            "name": "endDate",
-            "in": "query",
-            "type": "string"
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK"
+          "default": {
+            "description": ""
           }
         }
       }
     },
     "/bookings/calculate": {
       "get": {
-        "description": "",
-        "parameters": [
-          {
-            "name": "courtId",
-            "in": "query",
-            "type": "string"
-          },
-          {
-            "name": "startTime",
-            "in": "query",
-            "type": "string"
-          },
-          {
-            "name": "endTime",
-            "in": "query",
-            "type": "string"
-          }
+        "tags": [
+          "Bookings"
         ],
+        "summary": "Tính giá đặt sân (GET)",
+        "description": "",
         "responses": {
-          "200": {
-            "description": "OK"
+          "default": {
+            "description": ""
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Tính giá đặt sân (POST)",
+        "description": "",
+        "responses": {
+          "default": {
+            "description": ""
           }
         }
       }
     },
     "/bookings/admin/dashboard": {
       "get": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Lấy dữ liệu dashboard quản trị đặt sân",
         "description": "",
         "responses": {
-          "200": {
-            "description": "OK"
-          },
           "401": {
             "description": "Unauthorized"
           },
@@ -377,8 +437,12 @@
         }
       }
     },
-    "/bookings/{id}": {
-      "patch": {
+    "/bookings/{id}/retry-payment-info": {
+      "get": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Lấy thông tin thanh toán lại",
         "description": "",
         "parameters": [
           {
@@ -386,24 +450,40 @@
             "in": "path",
             "required": true,
             "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "schema": {
-              "type": "object",
-              "properties": {
-                "paymentStatus": {
-                  "example": "any"
-                }
-              }
-            }
           }
         ],
         "responses": {
           "200": {
             "description": "OK"
           },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/bookings/{id}": {
+      "patch": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Cập nhật đơn đặt sân",
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
           "401": {
             "description": "Unauthorized"
           },
@@ -415,6 +495,10 @@
     },
     "/bookings/{id}/time": {
       "patch": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Cập nhật thời gian đơn đặt sân",
         "description": "",
         "parameters": [
           {
@@ -422,33 +506,9 @@
             "in": "path",
             "required": true,
             "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "schema": {
-              "type": "object",
-              "properties": {
-                "courtId": {
-                  "example": "any"
-                },
-                "date": {
-                  "example": "any"
-                },
-                "startTime": {
-                  "example": "any"
-                },
-                "endTime": {
-                  "example": "any"
-                }
-              }
-            }
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK"
-          },
           "401": {
             "description": "Unauthorized"
           },
@@ -460,6 +520,10 @@
     },
     "/bookings/{id}/refund-status": {
       "patch": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Cập nhật trạng thái hoàn tiền",
         "description": "",
         "parameters": [
           {
@@ -467,30 +531,59 @@
             "in": "path",
             "required": true,
             "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "schema": {
-              "type": "object",
-              "properties": {
-                "status": {
-                  "example": "any"
-                },
-                "note": {
-                  "example": "any"
-                },
-                "markPaymentRefunded": {
-                  "example": "any"
-                }
-              }
-            }
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK"
+          "401": {
+            "description": "Unauthorized"
           },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/bookings/{id}/refund/reject": {
+      "post": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Từ chối yêu cầu hoàn tiền",
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/bookings/{id}/refund/complete": {
+      "post": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Hoàn tất hoàn tiền",
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
           "401": {
             "description": "Unauthorized"
           },
@@ -502,6 +595,10 @@
     },
     "/bookings/{id}/refund-request": {
       "post": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Gửi yêu cầu hoàn tiền",
         "description": "",
         "parameters": [
           {
@@ -509,33 +606,9 @@
             "in": "path",
             "required": true,
             "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "schema": {
-              "type": "object",
-              "properties": {
-                "accountNumber": {
-                  "example": "any"
-                },
-                "accountName": {
-                  "example": "any"
-                },
-                "bankName": {
-                  "example": "any"
-                },
-                "note": {
-                  "example": "any"
-                }
-              }
-            }
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK"
-          },
           "401": {
             "description": "Unauthorized"
           },
@@ -547,6 +620,10 @@
     },
     "/bookings/{id}/cancel": {
       "patch": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Hủy đơn đặt sân",
         "description": "",
         "parameters": [
           {
@@ -554,27 +631,9 @@
             "in": "path",
             "required": true,
             "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "schema": {
-              "type": "object",
-              "properties": {
-                "reason": {
-                  "example": "any"
-                },
-                "internalNote": {
-                  "example": "any"
-                }
-              }
-            }
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK"
-          },
           "401": {
             "description": "Unauthorized"
           }
@@ -583,6 +642,10 @@
     },
     "/bookings/{id}/confirm": {
       "patch": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Xác nhận đơn đặt sân",
         "description": "",
         "parameters": [
           {
@@ -593,9 +656,6 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK"
-          },
           "401": {
             "description": "Unauthorized"
           },
@@ -607,6 +667,10 @@
     },
     "/bookings/{id}/checkin": {
       "patch": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Check-in đơn đặt sân",
         "description": "",
         "parameters": [
           {
@@ -614,24 +678,84 @@
             "in": "path",
             "required": true,
             "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "schema": {
-              "type": "object",
-              "properties": {
-                "items": {
-                  "example": "any"
-                }
-              }
-            }
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK"
+          "401": {
+            "description": "Unauthorized"
           },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/bookings/{id}/equipments": {
+      "patch": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Thêm thiết bị vào đơn đặt sân",
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/bookings/{id}/admin-detail": {
+      "get": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Lấy chi tiết đơn đặt sân (admin)",
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/bookings/{id}/equipments-detail": {
+      "get": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Lấy chi tiết thiết bị của đơn đặt sân",
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
           "401": {
             "description": "Unauthorized"
           },
@@ -643,6 +767,10 @@
     },
     "/bookings/{id}/checkout": {
       "patch": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Check-out đơn đặt sân",
         "description": "",
         "parameters": [
           {
@@ -653,9 +781,48 @@
           }
         ],
         "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/bookings/payment/vietqr": {
+      "post": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Thanh toán qua VietQR",
+        "description": "",
+        "responses": {
           "200": {
             "description": "OK"
           },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/bookings/{id}/admin-cancel-cash": {
+      "post": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Admin hủy đơn thanh toán tiền mặt",
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
           "401": {
             "description": "Unauthorized"
           },
@@ -667,6 +834,10 @@
     },
     "/auth/register": {
       "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Đăng ký tài khoản mới",
         "description": "",
         "parameters": [
           {
@@ -691,6 +862,10 @@
     },
     "/auth/login": {
       "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Đăng nhập",
         "description": "",
         "responses": {
           "default": {
@@ -701,6 +876,10 @@
     },
     "/auth/forgot-password": {
       "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Quên mật khẩu",
         "description": "",
         "parameters": [
           {
@@ -725,6 +904,10 @@
     },
     "/auth/reset-password": {
       "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Đặt lại mật khẩu",
         "description": "",
         "parameters": [
           {
@@ -752,6 +935,10 @@
     },
     "/auth/verify-token": {
       "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Xác thực token đặt lại mật khẩu",
         "description": "",
         "parameters": [
           {
@@ -776,6 +963,10 @@
     },
     "/auth/verify-email": {
       "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Xác thực email",
         "description": "",
         "parameters": [
           {
@@ -800,6 +991,10 @@
     },
     "/invoices/": {
       "post": {
+        "tags": [
+          "Invoices"
+        ],
+        "summary": "Tạo hóa đơn mới",
         "description": "",
         "parameters": [
           {
@@ -825,6 +1020,9 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "OK"
+          },
           "201": {
             "description": "Created"
           },
@@ -840,6 +1038,10 @@
         }
       },
       "get": {
+        "tags": [
+          "Invoices"
+        ],
+        "summary": "Lấy danh sách hóa đơn",
         "description": "",
         "responses": {
           "200": {
@@ -853,6 +1055,10 @@
     },
     "/invoices/by-booking/{bookingId}": {
       "get": {
+        "tags": [
+          "Invoices"
+        ],
+        "summary": "Lấy hóa đơn theo đơn đặt sân",
         "description": "",
         "parameters": [
           {
@@ -880,6 +1086,10 @@
     },
     "/invoices/{id}": {
       "get": {
+        "tags": [
+          "Invoices"
+        ],
+        "summary": "Lấy chi tiết hóa đơn theo ID",
         "description": "",
         "parameters": [
           {
@@ -902,6 +1112,10 @@
         }
       },
       "patch": {
+        "tags": [
+          "Invoices"
+        ],
+        "summary": "Cập nhật trạng thái hóa đơn",
         "description": "",
         "parameters": [
           {
@@ -945,8 +1159,61 @@
         }
       }
     },
+    "/invoices/{id}/adjust-field": {
+      "patch": {
+        "tags": [
+          "Invoices"
+        ],
+        "summary": "Điều chỉnh giá sân trong hóa đơn",
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "newFieldAmount": {
+                  "example": "any"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          }
+        }
+      }
+    },
     "/payment/vnpay/create": {
       "post": {
+        "tags": [
+          "Payment"
+        ],
+        "summary": "Tạo thanh toán VNPay",
         "description": "",
         "parameters": [
           {
@@ -956,6 +1223,15 @@
               "type": "object",
               "properties": {
                 "bookingId": {
+                  "example": "any"
+                },
+                "bookingIds": {
+                  "example": "any"
+                },
+                "amount": {
+                  "example": "any"
+                },
+                "isRetryPayment": {
                   "example": "any"
                 }
               }
@@ -971,12 +1247,19 @@
           },
           "404": {
             "description": "Not Found"
+          },
+          "409": {
+            "description": "Conflict"
           }
         }
       }
     },
     "/payment/vnpay/return": {
       "get": {
+        "tags": [
+          "Payment"
+        ],
+        "summary": "Xử lý kết quả trả về từ VNPay",
         "description": "",
         "responses": {
           "default": {
@@ -985,8 +1268,106 @@
         }
       }
     },
+    "/payment/zalopay/create": {
+      "post": {
+        "tags": [
+          "Payment"
+        ],
+        "summary": "Tạo thanh toán ZaloPay",
+        "description": "",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "amount": {
+                  "example": "any"
+                },
+                "bookingIds": {
+                  "example": "any"
+                },
+                "returnUrl": {
+                  "example": "any"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/payment/zalopay/return": {
+      "get": {
+        "tags": [
+          "Payment"
+        ],
+        "summary": "Xử lý kết quả trả về từ ZaloPay",
+        "description": "",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "bookingIds",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "amount",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "apptransid",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/equipments/public": {
+      "get": {
+        "tags": [
+          "Equipments"
+        ],
+        "summary": "Lấy danh sách thiết bị (công khai)",
+        "description": "",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/equipments/": {
       "get": {
+        "tags": [
+          "Equipments"
+        ],
+        "summary": "Lấy danh sách thiết bị (admin)",
         "description": "",
         "parameters": [
           {
@@ -1005,6 +1386,10 @@
         }
       },
       "post": {
+        "tags": [
+          "Equipments"
+        ],
+        "summary": "Tạo thiết bị mới",
         "description": "",
         "parameters": [
           {
@@ -1059,6 +1444,10 @@
     },
     "/equipments/{id}": {
       "get": {
+        "tags": [
+          "Equipments"
+        ],
+        "summary": "Lấy chi tiết thiết bị theo ID",
         "description": "",
         "parameters": [
           {
@@ -1078,6 +1467,10 @@
         }
       },
       "patch": {
+        "tags": [
+          "Equipments"
+        ],
+        "summary": "Cập nhật thiết bị theo ID",
         "description": "",
         "parameters": [
           {
@@ -1097,6 +1490,10 @@
         }
       },
       "delete": {
+        "tags": [
+          "Equipments"
+        ],
+        "summary": "Xóa thiết bị theo ID",
         "description": "",
         "parameters": [
           {
@@ -1118,6 +1515,10 @@
     },
     "/booking-items/{bookingId}": {
       "get": {
+        "tags": [
+          "BookingItems"
+        ],
+        "summary": "Lấy danh sách thiết bị theo đơn đặt sân",
         "description": "",
         "parameters": [
           {
@@ -1137,6 +1538,10 @@
         }
       },
       "put": {
+        "tags": [
+          "BookingItems"
+        ],
+        "summary": "Cập nhật danh sách thiết bị cho đơn đặt sân",
         "description": "",
         "parameters": [
           {
@@ -1173,6 +1578,10 @@
     },
     "/users/": {
       "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Tìm kiếm người dùng",
         "description": "",
         "parameters": [
           {
@@ -1191,6 +1600,10 @@
         }
       },
       "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Tạo khách hàng offline",
         "description": "",
         "parameters": [
           {
@@ -1224,6 +1637,10 @@
     },
     "/users/sign-up": {
       "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Đăng ký tài khoản người dùng",
         "description": "",
         "parameters": [
           {
@@ -1257,6 +1674,10 @@
     },
     "/users/{id}": {
       "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Lấy chi tiết người dùng",
         "description": "",
         "parameters": [
           {
@@ -1273,6 +1694,10 @@
         }
       },
       "put": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Cập nhật thông tin người dùng",
         "description": "",
         "parameters": [
           {
@@ -1301,6 +1726,10 @@
         }
       },
       "delete": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Xóa người dùng",
         "description": "",
         "parameters": [
           {
@@ -1319,6 +1748,10 @@
     },
     "/users/{id}/block": {
       "patch": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Khóa tài khoản người dùng",
         "description": "",
         "parameters": [
           {
@@ -1340,6 +1773,10 @@
     },
     "/users/{id}/unlock": {
       "patch": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Mở khóa tài khoản người dùng",
         "description": "",
         "parameters": [
           {
@@ -1361,6 +1798,10 @@
     },
     "/upload/avatar": {
       "post": {
+        "tags": [
+          "Upload"
+        ],
+        "summary": "Upload ảnh đại diện",
         "description": "",
         "responses": {
           "200": {
@@ -1372,8 +1813,99 @@
         }
       }
     },
-    "/email/payment-success": {
+    "/upload/single": {
       "post": {
+        "tags": [
+          "Upload"
+        ],
+        "summary": "Upload một file",
+        "description": "",
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/vouchers/public": {
+      "get": {
+        "tags": [
+          "Vouchers"
+        ],
+        "summary": "Lấy danh sách voucher công khai",
+        "description": "",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/vouchers/debug": {
+      "get": {
+        "tags": [
+          "Vouchers"
+        ],
+        "summary": "Lấy danh sách voucher (debug)",
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/vouchers/": {
+      "get": {
+        "tags": [
+          "Vouchers"
+        ],
+        "summary": "Lấy danh sách voucher (admin)",
+        "description": "",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Vouchers"
+        ],
+        "summary": "Tạo voucher mới",
         "description": "",
         "parameters": [
           {
@@ -1382,28 +1914,98 @@
             "schema": {
               "type": "object",
               "properties": {
-                "email": {
+                "code": {
                   "example": "any"
                 },
-                "customerName": {
+                "description": {
                   "example": "any"
                 },
-                "bookingCode": {
+                "discountType": {
                   "example": "any"
                 },
-                "courtName": {
+                "discountValue": {
                   "example": "any"
                 },
-                "date": {
+                "maxDiscountValue": {
+                  "example": "any"
+                },
+                "minOrderValue": {
+                  "example": "any"
+                },
+                "totalIssued": {
+                  "example": "any"
+                },
+                "perUserLimit": {
+                  "example": "any"
+                },
+                "startDate": {
+                  "example": "any"
+                },
+                "endDate": {
+                  "example": "any"
+                },
+                "applicableCourtIds": {
+                  "example": "any"
+                },
+                "applicableCourtTypes": {
+                  "example": "any"
+                },
+                "applicableStartHour": {
+                  "example": "any"
+                },
+                "applicableEndHour": {
+                  "example": "any"
+                },
+                "status": {
+                  "example": "any"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/vouchers/validate": {
+      "post": {
+        "tags": [
+          "Vouchers"
+        ],
+        "summary": "Kiểm tra và áp dụng voucher",
+        "description": "",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "example": "any"
+                },
+                "orderTotal": {
+                  "example": "any"
+                },
+                "courtId": {
+                  "example": "any"
+                },
+                "bookingDate": {
                   "example": "any"
                 },
                 "startTime": {
                   "example": "any"
                 },
-                "endTime": {
-                  "example": "any"
-                },
-                "total": {
+                "expectedDiscountValue": {
                   "example": "any"
                 }
               }
@@ -1414,11 +2016,552 @@
           "200": {
             "description": "OK"
           },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/vouchers/{voucherId}/stats": {
+      "get": {
+        "tags": [
+          "Vouchers"
+        ],
+        "summary": "Lấy thống kê voucher",
+        "description": "",
+        "parameters": [
+          {
+            "name": "voucherId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/vouchers/{voucherId}": {
+      "get": {
+        "tags": [
+          "Vouchers"
+        ],
+        "summary": "Lấy chi tiết voucher theo ID",
+        "description": "",
+        "parameters": [
+          {
+            "name": "voucherId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Vouchers"
+        ],
+        "summary": "Cập nhật voucher",
+        "description": "",
+        "parameters": [
+          {
+            "name": "voucherId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "example": "any"
+                },
+                "description": {
+                  "example": "any"
+                },
+                "discountType": {
+                  "example": "any"
+                },
+                "discountValue": {
+                  "example": "any"
+                },
+                "maxDiscountValue": {
+                  "example": "any"
+                },
+                "minOrderValue": {
+                  "example": "any"
+                },
+                "totalIssued": {
+                  "example": "any"
+                },
+                "perUserLimit": {
+                  "example": "any"
+                },
+                "startDate": {
+                  "example": "any"
+                },
+                "endDate": {
+                  "example": "any"
+                },
+                "applicableCourtIds": {
+                  "example": "any"
+                },
+                "applicableCourtTypes": {
+                  "example": "any"
+                },
+                "applicableStartHour": {
+                  "example": "any"
+                },
+                "applicableEndHour": {
+                  "example": "any"
+                },
+                "status": {
+                  "example": "any"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Vouchers"
+        ],
+        "summary": "Xóa voucher",
+        "description": "",
+        "parameters": [
+          {
+            "name": "voucherId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/review/need-review/{id}": {
+      "get": {
+        "tags": [
+          "Reviews"
+        ],
+        "summary": "Lấy danh sách sân cần đánh giá",
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          }
+        }
+      }
+    },
+    "/review/{id}": {
+      "delete": {
+        "tags": [
+          "Reviews"
+        ],
+        "summary": "Xóa đánh giá",
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Reviews"
+        ],
+        "summary": "Cập nhật đánh giá",
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "rating": {
+                  "example": "any"
+                },
+                "comment": {
+                  "example": "any"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Reviews"
+        ],
+        "summary": "Lấy chi tiết đánh giá",
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/review/": {
+      "post": {
+        "tags": [
+          "Reviews"
+        ],
+        "summary": "Tạo đánh giá mới",
+        "description": "",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "bookingId": {
+                  "example": "any"
+                },
+                "rating": {
+                  "example": "any"
+                },
+                "comment": {
+                  "example": "any"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/review/admin/list": {
+      "get": {
+        "tags": [
+          "Reviews"
+        ],
+        "summary": "Lấy danh sách đánh giá (admin)",
+        "description": "",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "courtId",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/review/my": {
+      "get": {
+        "tags": [
+          "Reviews"
+        ],
+        "summary": "Lấy danh sách đánh giá của tôi",
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/review/court-pulic/{courtId}": {
+      "get": {
+        "tags": [
+          "Reviews"
+        ],
+        "summary": "Lấy đánh giá công khai theo sân",
+        "description": "",
+        "parameters": [
+          {
+            "name": "courtId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/review/{id}/status": {
+      "patch": {
+        "tags": [
+          "Reviews"
+        ],
+        "summary": "Cập nhật trạng thái đánh giá",
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "example": "any"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/reports/public/booking-stats": {
+      "get": {
+        "tags": [
+          "Reports"
+        ],
+        "summary": "Lấy thống kê đặt sân công khai",
+        "description": "",
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/reports/booking-stats": {
+      "get": {
+        "tags": [
+          "Reports"
+        ],
+        "summary": "Lấy thống kê đặt sân (admin)",
+        "description": "",
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/contacts/": {
+      "post": {
+        "tags": [
+          "Contacts"
+        ],
+        "summary": "Tạo liên hệ mới",
+        "description": "",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "example": "any"
+                },
+                "email": {
+                  "example": "any"
+                },
+                "phone": {
+                  "example": "any"
+                },
+                "message": {
+                  "example": "any"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
           "400": {
             "description": "Bad Request"
           },
           "500": {
             "description": "Internal Server Error"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Contacts"
+        ],
+        "summary": "Lấy danh sách tất cả liên hệ",
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          }
+        }
+      }
+    },
+    "/chat/": {
+      "post": {
+        "tags": [
+          "Chat"
+        ],
+        "summary": "Gửi tin nhắn chat",
+        "description": "",
+        "responses": {
+          "default": {
+            "description": ""
           }
         }
       }

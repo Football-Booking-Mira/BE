@@ -3,16 +3,28 @@ import { createVnpayPayment, vnpayReturn, createZalopayPayment, zalopayReturn } 
 
 const routerPayment = express.Router();
 
-// Tạo URL thanh toán
-routerPayment.post('/vnpay/create', createVnpayPayment);
+routerPayment.post('/vnpay/create',
+    // #swagger.tags = ['Payment']
+    // #swagger.summary = 'Tạo thanh toán VNPay'
+    createVnpayPayment
+);
 
-// Callback VNPAY trả về
-routerPayment.get('/vnpay/return', vnpayReturn);
+routerPayment.get('/vnpay/return',
+    // #swagger.tags = ['Payment']
+    // #swagger.summary = 'Xử lý kết quả trả về từ VNPay'
+    vnpayReturn
+);
 
-// Tạo URL thanh toán ZALOPAY
-routerPayment.post('/zalopay/create', createZalopayPayment);
+routerPayment.post('/zalopay/create',
+    // #swagger.tags = ['Payment']
+    // #swagger.summary = 'Tạo thanh toán ZaloPay'
+    createZalopayPayment
+);
 
-// Callback ZALOPAY trả về
-routerPayment.get('/zalopay/return', zalopayReturn);
+routerPayment.get('/zalopay/return',
+    // #swagger.tags = ['Payment']
+    // #swagger.summary = 'Xử lý kết quả trả về từ ZaloPay'
+    zalopayReturn
+);
 
 export default routerPayment;

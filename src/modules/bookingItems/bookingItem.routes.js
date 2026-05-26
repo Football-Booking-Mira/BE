@@ -5,17 +5,15 @@ import { getBookingItems, upsertBookingItems } from './bookingItem.controller.js
 import { upsertBookingItemsSchema } from './bookingItem.schema.js';
 
 const routesBookingItem = Router();
-
-//* Lấy danh sách thiết bị của 1 booking user và admin
-routesBookingItem.get('/:bookingId', authenticate, getBookingItems);
-
-//* Admin cập nhật thiết bị cho 1 booking
-routesBookingItem.put(
-    '/:bookingId',
-    authenticate,
-    authorize('admin'),
-    validBodyRequest(upsertBookingItemsSchema),
-    upsertBookingItems
+routesBookingItem.get('/:bookingId',
+    // #swagger.tags = ['BookingItems']
+    // #swagger.summary = 'Lấy danh sách thiết bị theo đơn đặt sân'
+    authenticate, getBookingItems
+);
+routesBookingItem.put('/:bookingId',
+    // #swagger.tags = ['BookingItems']
+    // #swagger.summary = 'Cập nhật danh sách thiết bị cho đơn đặt sân'
+    authenticate, authorize('admin'), validBodyRequest(upsertBookingItemsSchema), upsertBookingItems
 );
 
 export default routesBookingItem;

@@ -5,37 +5,45 @@ import { searchUsers, createOfflineCustomer, registerOnlineUser, getUserDetail, 
 import { createCustomerSchema, registerOnlineSchema } from './user.schema.js';
 
 const userRouter = Router();
-
-// Lấy danh sách khách hàng (admin dùng để tìm khách đặt sân)
-// GET /api/users?search=...
-userRouter.get('/', authenticate, authorize('admin'), searchUsers);
-
-// Tạo khách hàng mới tại quầy
-// POST /api/users
-userRouter.post(
-    '/',
-    authenticate,
-    authorize('admin'),
-    validBodyRequest(createCustomerSchema),
-    createOfflineCustomer
+userRouter.get('/',
+    // #swagger.tags = ['Users']
+    // #swagger.summary = 'Tìm kiếm người dùng'
+    authenticate, authorize('admin'), searchUsers
 );
-
-userRouter.post(
-    '/sign-up',
-    validBodyRequest(registerOnlineSchema),
-    registerOnlineUser
+userRouter.post('/',
+    // #swagger.tags = ['Users']
+    // #swagger.summary = 'Tạo khách hàng offline'
+    authenticate, authorize('admin'), validBodyRequest(createCustomerSchema), createOfflineCustomer
 );
-
-userRouter.get('/:id', getUserDetail);
-userRouter.put('/:id', authenticate, updateUser);
-userRouter.delete(
-    '/:id',
-    authenticate,
-    deleteUser
+userRouter.post('/sign-up',
+    // #swagger.tags = ['Users']
+    // #swagger.summary = 'Đăng ký tài khoản người dùng'
+    validBodyRequest(registerOnlineSchema), registerOnlineUser
 );
-
-userRouter.patch('/:id/block', authenticate, authorize('admin'), blockUser);
-userRouter.patch('/:id/unlock', authenticate, authorize('admin'), unlockUser);
-
+userRouter.get('/:id',
+    // #swagger.tags = ['Users']
+    // #swagger.summary = 'Lấy chi tiết người dùng'
+    getUserDetail
+);
+userRouter.put('/:id',
+    // #swagger.tags = ['Users']
+    // #swagger.summary = 'Cập nhật thông tin người dùng'
+    authenticate, updateUser
+);
+userRouter.delete('/:id',
+    // #swagger.tags = ['Users']
+    // #swagger.summary = 'Xóa người dùng'
+    authenticate, deleteUser
+);
+userRouter.patch('/:id/block',
+    // #swagger.tags = ['Users']
+    // #swagger.summary = 'Khóa tài khoản người dùng'
+    authenticate, authorize('admin'), blockUser
+);
+userRouter.patch('/:id/unlock',
+    // #swagger.tags = ['Users']
+    // #swagger.summary = 'Mở khóa tài khoản người dùng'
+    authenticate, authorize('admin'), unlockUser
+);
 
 export default userRouter;

@@ -16,9 +16,16 @@ import upload from '../../common/middlewares/upload.middleware.js';
 
 const routesCourt = Router();
 
-routesCourt.get('/', getListCourts);
+routesCourt.get('/',
+    // #swagger.tags = ['Courts']
+    // #swagger.summary = 'Lấy danh sách tất cả sân bóng'
+    getListCourts
+);
+
 // Tìm kiếm sân theo tên hoặc giá tiền
 routesCourt.get('/search', async (req, res) => {
+    // #swagger.tags = ['Courts']
+    // #swagger.summary = 'Tìm kiếm sân theo tên hoặc giá'
     try {
         const { name, minPrice, maxPrice } = req.query;
 
@@ -38,19 +45,45 @@ routesCourt.get('/search', async (req, res) => {
     }
 });
 
-routesCourt.get('/:id', getDetailCourt);
-routesCourt.delete('/:id', deleteCourt);
-routesCourt.delete('/soft-delete/:id', softDeleteCourt);
+routesCourt.get('/:id',
+    // #swagger.tags = ['Courts']
+    // #swagger.summary = 'Lấy chi tiết sân theo ID'
+    getDetailCourt
+);
 
-routesCourt.post('/', upload.array('images', 10), validBodyrequest(courtSchema), createCourt);
-routesCourt.patch(
-    '/:id',
+routesCourt.delete('/:id',
+    // #swagger.tags = ['Courts']
+    // #swagger.summary = 'Xóa sân theo ID'
+    deleteCourt
+);
+
+routesCourt.delete('/soft-delete/:id',
+    // #swagger.tags = ['Courts']
+    // #swagger.summary = 'Xóa mềm sân theo ID'
+    softDeleteCourt
+);
+
+routesCourt.post('/',
+    // #swagger.tags = ['Courts']
+    // #swagger.summary = 'Tạo sân mới'
+    upload.array('images', 10),
+    validBodyrequest(courtSchema),
+    createCourt
+);
+
+routesCourt.patch('/:id',
+    // #swagger.tags = ['Courts']
+    // #swagger.summary = 'Cập nhật thông tin sân'
     upload.array('images', 10),
     validBodyrequest(updateCourtSchema),
     updateCourt
 );
 
 // Bảo trì
-routesCourt.patch('/maintenance/:id', updateCourtMaintenance);
+routesCourt.patch('/maintenance/:id',
+    // #swagger.tags = ['Courts']
+    // #swagger.summary = 'Cập nhật trạng thái bảo trì sân'
+    updateCourtMaintenance
+);
 
 export default routesCourt;

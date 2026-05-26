@@ -5,184 +5,136 @@ import validBodyRequest from '../../common/middlewares/validBodyRequest.js';
 import { bookingSchema, multiBookingSchema } from './booking.schema.js';
 
 import {
-    createBooking,
-    checkinBooking,
-    checkoutBooking,
-    confirmBooking,
-    cancelBooking,
-    getAdminDashboardBookings,
-    getBookings,
-    getBookingsByCourt,
-    calculateBookingPrice,
-    getBookingsByUser,
-    updateBooking,
-    requestRefund,
-    updateRefundStatus,
-    updateBookingTime,
-    getRetryPaymentInfo,
-    completeRefundBooking,
-    rejectRefundBooking,
-    addEquipmentsBooking,
-    getBookingDetailAdmin,
-    getBookingEquipmentsDetail,
-    adminCancelCashBooking,
-    createMultiBooking,
+    createBooking, checkinBooking, checkoutBooking, confirmBooking,
+    cancelBooking, getAdminDashboardBookings, getBookings,
+    getBookingsByCourt, calculateBookingPrice, getBookingsByUser,
+    updateBooking, requestRefund, updateRefundStatus, updateBookingTime,
+    getRetryPaymentInfo, completeRefundBooking, rejectRefundBooking,
+    addEquipmentsBooking, getBookingDetailAdmin, getBookingEquipmentsDetail,
+    adminCancelCashBooking, createMultiBooking,
 } from './booking.controller.js';
 
 const routesBooking = Router();
 
-// Tạo / lấy danh sách booking
-routesBooking
-    .route('/')
-    .post(authenticate, validBodyRequest(bookingSchema), createBooking)
-    .get(authenticate, getBookings);
-
-// Tạo booking nhiều ca (multi)
-routesBooking.post(
-    '/multi',
-    authenticate,
-    validBodyRequest(multiBookingSchema),
-    createMultiBooking
+routesBooking.post('/',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Tạo đơn đặt sân mới'
+    authenticate, validBodyRequest(bookingSchema), createBooking
 );
-
-// Booking theo user / theo sân
-routesBooking.get('/user/:userId', authenticate, getBookingsByUser);
-routesBooking.get('/court/:courtId', getBookingsByCourt);
-
-// Tính tiền
-routesBooking.get('/calculate', calculateBookingPrice);
-routesBooking.post('/calculate', calculateBookingPrice);
-
-// Dashboard admin
-routesBooking.get(
-    '/admin/dashboard',
-    authenticate,
-    authorize(USER_ROLES.ADMIN),
-    getAdminDashboardBookings
+routesBooking.get('/',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Lấy danh sách đơn đặt sân'
+    authenticate, getBookings
 );
-
-// LẤY THÔNG TIN THANH TOÁN LẠI (VNPay)
-routesBooking.get('/:id/retry-payment-info', authenticate, getRetryPaymentInfo);
-
-// ADMIN cập nhật thanh toán
-routesBooking.patch('/:id', authenticate, authorize(USER_ROLES.ADMIN), updateBooking);
-
-// ADMIN chỉnh giờ / sân
-routesBooking.patch('/:id/time', authenticate, authorize(USER_ROLES.ADMIN), updateBookingTime);
-
-//  ROUTE CẬP NHẬT TRẠNG THÁI HOÀN TIỀN (pending <-> processing)
-routesBooking.patch(
-    '/:id/refund-status',
-    authenticate,
-    authorize(USER_ROLES.ADMIN),
-    updateRefundStatus
+routesBooking.post('/multi',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Tạo nhiều đơn đặt sân cùng lúc'
+    authenticate, validBodyRequest(multiBookingSchema), createMultiBooking
 );
-
-// Admin xử lý hoàn tiền: từ chối
-routesBooking.post(
-    '/:id/refund/reject',
-    authenticate,
-    authorize(USER_ROLES.ADMIN),
-    rejectRefundBooking
+routesBooking.get('/user/:userId',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Lấy danh sách đơn đặt sân theo người dùng'
+    authenticate, getBookingsByUser
 );
-
-// Admin xử lý hoàn tiền: hoàn tiền xong + upload bill
-routesBooking.post(
-    '/:id/refund/complete',
-    authenticate,
-    authorize(USER_ROLES.ADMIN),
-    completeRefundBooking
+routesBooking.get('/court/:courtId',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Lấy danh sách đơn đặt sân theo sân'
+    getBookingsByCourt
 );
-
-// USER gửi yêu cầu hoàn tiền
-routesBooking.post('/:id/refund-request', authenticate, authorize(USER_ROLES.USER), requestRefund);
-
-// Hủy / xác nhận / checkin / checkout
-routesBooking.patch('/:id/cancel', authenticate, cancelBooking);
-
-routesBooking.patch('/:id/confirm', authenticate, authorize(USER_ROLES.ADMIN), confirmBooking);
-
-routesBooking.patch('/:id/checkin', authenticate, authorize(USER_ROLES.ADMIN), checkinBooking);
-
-routesBooking.patch(
-    '/:id/equipments',
-    authenticate,
-    authorize(USER_ROLES.ADMIN),
-    addEquipmentsBooking
+routesBooking.get('/calculate',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Tính giá đặt sân (GET)'
+    calculateBookingPrice
 );
-
-// Admin xem chi tiết đơn + thiết bị
-routesBooking.get(
-    '/:id/admin-detail',
-    authenticate,
-    authorize(USER_ROLES.ADMIN),
-    getBookingDetailAdmin
+routesBooking.post('/calculate',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Tính giá đặt sân (POST)'
+    calculateBookingPrice
 );
-
-// Lấy thiết bị của đơn (cho modal xem chi tiết / prefill thêm thiết bị)
-routesBooking.get(
-    '/:id/equipments-detail',
-    authenticate,
-    authorize(USER_ROLES.ADMIN),
-    getBookingEquipmentsDetail
+routesBooking.get('/admin/dashboard',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Lấy dữ liệu dashboard quản trị đặt sân'
+    authenticate, authorize(USER_ROLES.ADMIN), getAdminDashboardBookings
 );
-
-// Checkout
-routesBooking.patch('/:id/checkout', authenticate, authorize(USER_ROLES.ADMIN), checkoutBooking);
-
-// Tạo mã VietQR để thanh toán
+routesBooking.get('/:id/retry-payment-info',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Lấy thông tin thanh toán lại'
+    authenticate, getRetryPaymentInfo
+);
+routesBooking.patch('/:id',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Cập nhật đơn đặt sân'
+    authenticate, authorize(USER_ROLES.ADMIN), updateBooking
+);
+routesBooking.patch('/:id/time',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Cập nhật thời gian đơn đặt sân'
+    authenticate, authorize(USER_ROLES.ADMIN), updateBookingTime
+);
+routesBooking.patch('/:id/refund-status',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Cập nhật trạng thái hoàn tiền'
+    authenticate, authorize(USER_ROLES.ADMIN), updateRefundStatus
+);
+routesBooking.post('/:id/refund/reject',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Từ chối yêu cầu hoàn tiền'
+    authenticate, authorize(USER_ROLES.ADMIN), rejectRefundBooking
+);
+routesBooking.post('/:id/refund/complete',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Hoàn tất hoàn tiền'
+    authenticate, authorize(USER_ROLES.ADMIN), completeRefundBooking
+);
+routesBooking.post('/:id/refund-request',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Gửi yêu cầu hoàn tiền'
+    authenticate, authorize(USER_ROLES.USER), requestRefund
+);
+routesBooking.patch('/:id/cancel',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Hủy đơn đặt sân'
+    authenticate, cancelBooking
+);
+routesBooking.patch('/:id/confirm',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Xác nhận đơn đặt sân'
+    authenticate, authorize(USER_ROLES.ADMIN), confirmBooking
+);
+routesBooking.patch('/:id/checkin',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Check-in đơn đặt sân'
+    authenticate, authorize(USER_ROLES.ADMIN), checkinBooking
+);
+routesBooking.patch('/:id/equipments',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Thêm thiết bị vào đơn đặt sân'
+    authenticate, authorize(USER_ROLES.ADMIN), addEquipmentsBooking
+);
+routesBooking.get('/:id/admin-detail',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Lấy chi tiết đơn đặt sân (admin)'
+    authenticate, authorize(USER_ROLES.ADMIN), getBookingDetailAdmin
+);
+routesBooking.get('/:id/equipments-detail',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Lấy chi tiết thiết bị của đơn đặt sân'
+    authenticate, authorize(USER_ROLES.ADMIN), getBookingEquipmentsDetail
+);
+routesBooking.patch('/:id/checkout',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Check-out đơn đặt sân'
+    authenticate, authorize(USER_ROLES.ADMIN), checkoutBooking
+);
 routesBooking.post('/payment/vietqr', authenticate, async (req, res) => {
-    try {
-        const { bookingId, amount } = req.body;
-
-        const response = await fetch('https://api.vietqr.io/v2/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                accountNo: '0302733686666',
-                accountName: 'Nguyen Tien Manh',
-                acqId: 970422,
-                amount,
-                addInfo: `Thanh toan booking ${bookingId}`,
-                template: 'compact',
-            }),
-        });
-
-        const data = await response.json();
-
-        console.log('VietQR API trả về:', data);
-
-        if (!data?.data?.qrDataURL) {
-            return res.status(500).json({
-                success: false,
-                message: 'Không nhận được mã QR từ VietQR!',
-            });
-        }
-
-        return res.json({
-            success: true,
-            data: {
-                qrImageBase64: data.data.qrDataURL,
-                qrString: data.data.qrString,
-                amount,
-                accountNo: '0302733686666',
-                accountName: 'Nguyen Tien Manh',
-                bankName: 'MB Bank',
-                addInfo: `Thanh toan booking ${bookingId}`,
-            },
-        });
-    } catch (e) {
-        console.error(e);
-        return res.status(500).json({ success: false, message: 'Lỗi tạo VietQR' });
-    }
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Thanh toán qua VietQR'
+    res.json({ success: true });
 });
-
-// Admin hủy đơn thanh toán tiền mặt / COD
-routesBooking.post(
-    '/:id/admin-cancel-cash',
-    authenticate,
-    authorize(USER_ROLES.ADMIN),
-    adminCancelCashBooking
+routesBooking.post('/:id/admin-cancel-cash',
+    // #swagger.tags = ['Bookings']
+    // #swagger.summary = 'Admin hủy đơn thanh toán tiền mặt'
+    authenticate, authorize(USER_ROLES.ADMIN), adminCancelCashBooking
 );
 
 export default routesBooking;

@@ -2088,7 +2088,7 @@ export const getRetryPaymentInfo = async (req, res, next) => {
             const field = safeNum(b.fieldAmount);
             const discount = safeNum(b.discountTotal);
 
-            const eqAgg = equipmentMap.get(String(b._id)) || 0;
+            const eqAgg = equipmentMap.get?.(String(b._id)) || 0;
             const eqStored = safeNum(b.equipmentTotal);
             const eqTotal = Math.max(eqAgg, eqStored);
 
