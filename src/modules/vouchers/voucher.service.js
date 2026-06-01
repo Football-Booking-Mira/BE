@@ -131,12 +131,17 @@ export const validateVoucherForOrder = async ({
 
     const voucher = await Voucher.findOne({
         code: normalizedCode,
-        status: VOUCHER_STATUS.ACTIVE,
         isDeleted: { $ne: true },
     });
 
     if (!voucher) {
         throw createError(404, 'Voucher không tồn tại hoặc đã bị vô hiệu!');
+    }
+
+    // Kiểm tra status thực tế qua computeVoucherStatus (đồng bộ với admin)
+    const effectiveStatus = computeVoucherStatus(voucher);
+    if (effectiveStatus !== 'active') {
+        throw createError(400, 'Voucher không còn hoạt động!');
     }
 
     // FE gửi kèm giá trị giảm mà khách đã thấy trước đó

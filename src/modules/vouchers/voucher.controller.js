@@ -57,9 +57,10 @@ export const getPublicVouchers = handleAsync(async (req, res) => {
   const { limit = 20 } = req.query;
   const now = new Date();
 
+  // Không filter theo status trong DB vì admin hiển thị status qua computeVoucherStatus()
+  // Thay vào đó, lấy tất cả voucher trong thời hạn rồi dùng computeVoucherStatus() để lọc
   const filters = {
     isDeleted: { $ne: true },
-    status: VOUCHER_STATUS.ACTIVE,
     startDate: { $lte: now },
     endDate: { $gte: now },
     remainingQuantity: { $gt: 0 },
@@ -67,18 +68,23 @@ export const getPublicVouchers = handleAsync(async (req, res) => {
 
   const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 50);
 
-  // Lấy voucher hợp lệ
+  // Lấy voucher hợp lệ (lấy nhiều hơn để sau khi filter vẫn đủ limit)
   const vouchers = await Voucher.find(filters)
     .sort({ createdAt: -1 })
-    .limit(safeLimit)
+    .limit(safeLimit * 2)
     .select(
-      "code description discountType discountValue maxDiscountValue minOrderValue remainingQuantity totalIssued startDate endDate applicableCourtTypes timeRestrictions"
+      "code description discountType discountValue maxDiscountValue minOrderValue remainingQuantity totalIssued startDate endDate applicableCourtTypes timeRestrictions status"
     )
     .lean();
 
+  // Chỉ giữ voucher có computeVoucherStatus === 'active'
+  const activeVouchers = vouchers.filter(
+    (v) => computeVoucherStatus(v) === "active"
+  ).slice(0, safeLimit);
+
   // Tính toán remainingQuantity chính xác từ VoucherUsage nếu cần
   const processedVouchers = await Promise.all(
-    vouchers.map(async (voucher) => {
+    activeVouchers.map(async (voucher) => {
       // Tính lại remainingQuantity từ usage thực tế
       const appliedUsageCount = await VoucherUsage.countDocuments({
         voucherId: voucher._id,
