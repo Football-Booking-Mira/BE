@@ -60,7 +60,6 @@ const courtSchema = new mongoose.Schema(
     }
 );
 //filter và tìm kiếm
-courtSchema.index({ code: 1 });
 courtSchema.index({ status: 1, type: 1 });
 const courtAmenitySchema = new mongoose.Schema(
     {

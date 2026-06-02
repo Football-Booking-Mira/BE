@@ -33,8 +33,7 @@ const UserSchema = new Schema(
     }
 );
 
-// 🔍 Index tối ưu tìm kiếm
-UserSchema.index({ email: 1 });
+
 UserSchema.index({ phone: 1 });
 
 const User = mongoose.model('User', UserSchema);

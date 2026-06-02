@@ -107,8 +107,6 @@ const VoucherSchema = new Schema(
     }
 );
 
-VoucherSchema.index({ code: 1 }, { unique: true });
-
 VoucherSchema.pre('save', function voucherPreSave(next) {
     if (this.code) {
         this.code = this.code.trim().toUpperCase();

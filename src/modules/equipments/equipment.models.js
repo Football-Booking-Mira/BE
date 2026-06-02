@@ -67,7 +67,5 @@ const EquipmentSchema = new Schema(
     }
 );
 
-EquipmentSchema.index({ code: 1 }, { unique: true });
-
 const Equipment = mongoose.model('Equipment', EquipmentSchema);
 export default Equipment;

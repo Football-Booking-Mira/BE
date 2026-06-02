@@ -9,7 +9,7 @@ export const {
     CLOUDINARY_API_KEY,
     CLOUDINARY_API_SECRET,
     JWT_ACCESS_EXPIRED,
-    JWT_ACCESS_SECRECT,
+    JWT_ACCESS_SECRET,
     FRONT_END_URL,
     EMAIL,
     EMAIL_PASSWORD,
@@ -18,4 +18,6 @@ export const {
     VNP_URL,
     VNP_RETURN_URL,
 } = process.env;
-export const JWT_ACCESS_SECRET = JWT_ACCESS_SECRECT || 'default_secret';
+export const JWT_ACCESS_SECRET_FINAL =
+    JWT_ACCESS_SECRET || 'default_secret';
+export const JWT_ACCESS_SECRECT = JWT_ACCESS_SECRET_FINAL;
