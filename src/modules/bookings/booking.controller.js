@@ -1096,7 +1096,7 @@ export const cancelBooking = handleAsync(async (req, res, next) => {
     booking.voucherUsageStatus = 'none';
   }
 
-  //  Khi hủy 1 phần đơn có voucher: xóa discountTotal trên các ca còn lại
+  //  Khi hủy 1 phần đơn có voucher: xóa discountTotal trên TẤT CẢ booking trong order
   // Vì voucher mất hiệu lực khi hủy một phần (như cảnh báo FE đã thông báo)
   if (booking.orderId && remainingBookings > 0) {
     // Kiểm tra đơn có voucher không (bất kỳ booking nào trong order có discountTotal > 0)
@@ -1111,6 +1111,7 @@ export const cancelBooking = handleAsync(async (req, res, next) => {
     ) || Number(booking.discountTotal || 0) > 0 || booking.voucherCode || booking.voucherId;
 
     if (orderHasVoucher) {
+      // Xóa discount trên các ca còn lại (không bị hủy)
       for (const sibling of siblingBookings) {
         if (Number(sibling.discountTotal || 0) > 0) {
           sibling.discountTotal = 0;
@@ -1121,6 +1122,36 @@ export const cancelBooking = handleAsync(async (req, res, next) => {
           await sibling.save();
         }
       }
+
+      // Xóa discount trên chính booking bị hủy để refund amount đúng
+      // Refund = fieldAmount gốc (không trừ voucher) vì voucher đã bị revoke
+      if (Number(booking.discountTotal || 0) > 0) {
+        booking.discountTotal = 0;
+        booking.total = Math.max(0, Number(booking.fieldAmount || 0) + Number(booking.equipmentTotal || 0));
+        booking.voucherCode = '';
+        booking.voucherId = null;
+        booking.voucherDiscount = 0;
+      }
+    }
+  }
+
+  if (isPaidOrPartial) {
+    if (booking.orderId) {
+      const allBookings = await Booking.find({ orderId: booking.orderId });
+      const totalPaid = allBookings.reduce((sum, b) => sum + (b.depositAmount || 0), 0);
+      const totalRefundedSoFar = allBookings.reduce((sum, b) => {
+        if (b.status === BOOKING_STATUS.CANCELLED && String(b._id) !== String(booking._id)) {
+          return sum + (b.refundAmount || 0);
+        }
+        return sum;
+      }, 0);
+      const activeBookings = allBookings.filter(
+        (b) => b.status !== BOOKING_STATUS.CANCELLED && String(b._id) !== String(booking._id)
+      );
+      const totalCostOfActiveBookings = activeBookings.reduce((sum, b) => sum + (b.total || 0), 0);
+      booking.refundAmount = Math.max(0, totalPaid - totalRefundedSoFar - totalCostOfActiveBookings);
+    } else {
+      booking.refundAmount = booking.depositAmount || booking.total || 0;
     }
   }
 
@@ -2377,10 +2408,12 @@ export const adminCancelCashBooking = handleAsync(async (req, res, next) => {
       booking.paymentStatus = PAYMENT_STATUS.REFUNDED;
       booking.refundStatus = 'refunded';
       booking.refundProcessedAt = new Date();
+      booking.refundAmount = booking.depositAmount || 0;
       booking.refundAdminReason =
         adminReason?.trim() || 'Admin hủy đơn thanh toán tiền mặt và đã trả lại tiền cọc cho khách';
     } else {
       booking.refundStatus = booking.refundStatus || 'none';
+      booking.refundAmount = 0;
       booking.refundAdminReason =
         adminReason?.trim() || 'Admin hủy đơn, admin giữ tiền cọc theo chính sách hủy sân';
     }
@@ -2389,16 +2422,19 @@ export const adminCancelCashBooking = handleAsync(async (req, res, next) => {
       booking.paymentStatus = PAYMENT_STATUS.REFUNDED;
       booking.refundStatus = 'refunded';
       booking.refundProcessedAt = new Date();
+      booking.refundAmount = booking.total || 0;
       booking.refundAdminReason =
         adminReason?.trim() ||
         'Admin hủy đơn thanh toán tiền mặt và đã hoàn lại toàn bộ tiền cho khách';
     } else {
       booking.refundStatus = booking.refundStatus || 'none';
+      booking.refundAmount = 0;
       booking.refundAdminReason =
         adminReason?.trim() || 'Admin hủy đơn, CLB không hoàn tiền (theo chính sách)';
     }
   } else {
     booking.refundStatus = booking.refundStatus || 'none';
+    booking.refundAmount = 0;
     if (adminReason?.trim()) {
       booking.refundAdminReason = adminReason.trim();
     }

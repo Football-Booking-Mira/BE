@@ -294,6 +294,10 @@ const BookingSchema = new Schema(
             type: Date,
             default: null, // lúc admin xử lý xong (từ chối / hoàn tiền)
         },
+        refundAmount: {
+            type: Number,
+            default: 0,
+        },
         autoCancelAt: {
             type: Date,
             default: null,

@@ -662,18 +662,112 @@ export const vnpayReturn = async (req, res, next) => {
 
 export const createZalopayPayment = async (req, res, next) => {
     try {
-        const { amount, bookingIds, returnUrl } = req.body;
+        const { amount, bookingId, bookingIds, isRetryPayment } = req.body;
         
-        if (!bookingIds || !amount) {
-            return res.status(400).json({ success: false, message: 'Thiếu thông tin đơn hàng.' });
+        const isRetry = isRetryPayment === true || isRetryPayment === 'true';
+        
+        let ids = [];
+        if (Array.isArray(bookingIds) && bookingIds.length > 0) ids = bookingIds;
+        else if (bookingId) ids = [bookingId];
+        else {
+            return res
+                .status(400)
+                .json({ success: false, message: 'Thiếu bookingId hoặc bookingIds' });
         }
-        
-        const ids = Array.isArray(bookingIds) ? bookingIds.join(',') : bookingIds;
-        
+
+        const invalidId = ids.find((id) => !isValidObjectId(id));
+        if (invalidId) {
+            return res.status(400).json({
+                success: false,
+                message: `bookingId không hợp lệ: ${invalidId}`,
+            });
+        }
+
+        const bookings = await Booking.find({ _id: { $in: ids } });
+        if (!bookings || bookings.length === 0) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy booking' });
+        }
+
+        // Chặn đơn đã có hoá đơn
+        const invCount = await InvoiceModel.countDocuments({ bookingId: { $in: ids } });
+        if (invCount > 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Đơn đã có hoá đơn, không thể thanh toán lại',
+            });
+        }
+
+        // Chặn đơn đã huỷ hoặc đã thanh toán đủ
+        const invalid = bookings.find(
+            (b) =>
+                b.status === BOOKING_STATUS.CANCELLED ||
+                b.paymentStatus === PAYMENT_STATUS.PAID ||
+                b.paymentStatus === PAYMENT_STATUS.REFUNDED
+        );
+        if (invalid) {
+            return res.status(400).json({
+                success: false,
+                message: `Có ca không hợp lệ để thanh toán (đã hủy hoặc đã thanh toán đủ): ${invalid.code}`,
+            });
+        }
+
+        // Commit voucher nếu chưa retry
+        if (!isRetry) {
+            const committed = [];
+            try {
+                for (const b of bookings) {
+                    if (b.voucherId && b.voucherUsageStatus === 'pending' && b.customerId) {
+                        const usage = await commitVoucherUsage({
+                            voucherId: b.voucherId,
+                            bookingId: b._id,
+                            userId: b.customerId,
+                            discountAmount: b.voucherDiscount || 0,
+                            orderTotal: b.fieldAmount || 0,
+                        });
+
+                        b.voucherUsageId = usage._id;
+                        b.voucherUsageStatus = 'applied';
+                        await b.save();
+
+                        committed.push(b);
+                    }
+                }
+            } catch (error) {
+                for (const b of committed) {
+                    try {
+                        await rollbackVoucherUsage(b.voucherId, b.customerId, b._id);
+                        b.voucherUsageStatus = 'pending';
+                        b.voucherUsageId = undefined;
+                        await b.save();
+                    } catch {}
+                }
+
+                const isOutOfUsage =
+                    error.statusCode === 409 ||
+                    error.message?.includes('hết lượt') ||
+                    error.message?.includes('hết lượt sử dụng');
+
+                if (isOutOfUsage) {
+                    return res.status(409).json({
+                        success: false,
+                        message:
+                            'Voucher bạn chọn đã hết lượt sử dụng trong lúc thanh toán. Vui lòng chọn voucher khác.',
+                        code: 'VOUCHER_OUT_OF_STOCK',
+                    });
+                }
+
+                return res.status(400).json({
+                    success: false,
+                    message: error.message || 'Không thể áp dụng voucher. Vui lòng thử lại.',
+                });
+            }
+        }
+
+        const idsStr = ids.join(',');
         const transID = Math.floor(Math.random() * 1000000);
         const yymmdd = new Date().toISOString().slice(2,10).replace(/-/g, '');
         
-        const backendReturnUrl = `${req.protocol}://${req.get('host')}/api/payment/zalopay/return?bookingIds=${ids}`;
+        const backendReturnUrl = `${req.protocol}://${req.get('host')}/api/payment/zalopay/return?bookingIds=${idsStr}`;
         
         const embed_data = {
             redirecturl: backendReturnUrl
@@ -710,6 +804,19 @@ export const createZalopayPayment = async (req, res, next) => {
         if (result.return_code === 1) {
             return res.status(200).json({ success: true, paymentUrl: result.order_url });
         } else {
+            // rollback voucher if payment link creation failed
+            if (!isRetry) {
+                for (const b of bookings) {
+                    if (b.voucherId && b.voucherUsageStatus === 'applied' && b.voucherUsageId && b.customerId) {
+                        try {
+                            await rollbackVoucherUsage(b.voucherId, b.customerId, b._id);
+                            b.voucherUsageStatus = 'pending';
+                            b.voucherUsageId = undefined;
+                            await b.save();
+                        } catch {}
+                    }
+                }
+            }
             return res.status(400).json({ success: false, message: 'Lỗi ZaloPay: ' + result.return_message });
         }
     } catch (err) {
