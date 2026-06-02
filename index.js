@@ -1,3 +1,5 @@
+import dotenv from 'dotenv';
+dotenv.config();
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
@@ -10,9 +12,9 @@ import { errorMiddleware } from './src/common/middlewares/error.middleware.js';
 import { FRONT_END_URL, HOST, PORT } from './src/common/config/environment.js';
 import { connectDB } from './src/common/config/database.js';
 import setupSwagger from './src/common/config/swagger-config.js';
-import dotenv from 'dotenv';
+
 import startAutoCancelJob from './src/jobs/autoCancelJob.js';
-dotenv.config();
+
 
 connectDB();
 
