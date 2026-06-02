@@ -22,7 +22,7 @@ const app = express();
 app.use(express.json());
 app.use(
     cors({
-        origin: FRONT_END_URL || 'http://localhost:5173',
+        origin: true,
         credentials: true,
     })
 );
@@ -40,7 +40,7 @@ app.use(errorMiddleware);
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: {
-        origin: FRONT_END_URL || 'http://localhost:5173',
+        origin: true,
         credentials: true,
     },
 });
