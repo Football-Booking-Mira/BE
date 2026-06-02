@@ -53,5 +53,5 @@ startAutoCancelJob(app);
 
 //  Lắng nghe server
 httpServer.listen(PORT, () => {
-    console.log(` API + Socket.IO running at http://${HOST}:${PORT}`);
+   console.log(`Server running on port ${PORT}`);
 });
