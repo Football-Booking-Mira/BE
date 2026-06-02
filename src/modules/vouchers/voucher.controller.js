@@ -59,11 +59,11 @@ export const getPublicVouchers = handleAsync(async (req, res) => {
 
   // Không filter theo status trong DB vì admin hiển thị status qua computeVoucherStatus()
   // Thay vào đó, lấy tất cả voucher trong thời hạn rồi dùng computeVoucherStatus() để lọc
+  // Lấy tất cả voucher active trong thời hạn (kể cả hết lượt để FE hiển thị "Hết lượt")
   const filters = {
     isDeleted: { $ne: true },
     startDate: { $lte: now },
     endDate: { $gte: now },
-    remainingQuantity: { $gt: 0 },
   };
 
   const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 50);
@@ -82,20 +82,9 @@ export const getPublicVouchers = handleAsync(async (req, res) => {
     (v) => computeVoucherStatus(v) === "active"
   ).slice(0, safeLimit);
 
-  // Tính toán remainingQuantity chính xác từ VoucherUsage nếu cần
+  // Map ra dữ liệu public (dùng remainingQuantity trực tiếp từ DB, đồng bộ với admin)
   const processedVouchers = await Promise.all(
     activeVouchers.map(async (voucher) => {
-      // Tính lại remainingQuantity từ usage thực tế
-      const appliedUsageCount = await VoucherUsage.countDocuments({
-        voucherId: voucher._id,
-        status: "applied",
-      });
-
-      const actualRemaining = Math.max(
-        0,
-        voucher.totalIssued - appliedUsageCount
-      );
-
       // Lấy số lần user đã dùng voucher này (nếu đã đăng nhập)
       let userUsageCount = 0;
       if (userId) {
@@ -113,9 +102,9 @@ export const getPublicVouchers = handleAsync(async (req, res) => {
         discountValue: voucher.discountValue,
         maxDiscountValue: voucher.maxDiscountValue,
         minOrderValue: voucher.minOrderValue || 0,
-        remainingQuantity: actualRemaining,
+        remainingQuantity: voucher.remainingQuantity, // Dùng trực tiếp từ DB (đồng bộ admin)
         totalIssued: voucher.totalIssued,
-        usedCount: appliedUsageCount,
+        usedCount: voucher.totalIssued - voucher.remainingQuantity,
         userUsedCount: userUsageCount, // Số lần user hiện tại đã dùng
         perUserLimit: voucher.perUserLimit || 1,
         startDate: voucher.startDate,
@@ -137,17 +126,12 @@ export const getPublicVouchers = handleAsync(async (req, res) => {
     })
   );
 
-  // Lọc chỉ những voucher còn lượt dùng
-  const availableVouchers = processedVouchers.filter(
-    (v) => v.remainingQuantity > 0
-  );
-
   return res.json(
     createResponse(
       true,
       200,
       "Lấy danh sách voucher thành công!",
-      availableVouchers
+      processedVouchers
     )
   );
 });
