@@ -1087,7 +1087,7 @@ export const cancelBooking = handleAsync(async (req, res, next) => {
     booking.voucherUsageId &&
     booking.voucherUsageStatus === 'applied' &&
     ![BOOKING_STATUS.IN_USE, BOOKING_STATUS.COMPLETED].includes(previousStatus) &&
-    remainingBookings === 0 // 🔥 CHỈ BOOKING CUỐI CÙNG
+    remainingBookings === 0 //  CHỈ BOOKING CUỐI CÙNG
   ) {
     await restoreVoucherUsage(booking);
     booking.voucherUsageStatus = 'restored';
@@ -1096,7 +1096,35 @@ export const cancelBooking = handleAsync(async (req, res, next) => {
     booking.voucherUsageStatus = 'none';
   }
 
-  await booking.save(); // 🔥 SAVE LẦN CUỐI
+  //  Khi hủy 1 phần đơn có voucher: xóa discountTotal trên các ca còn lại
+  // Vì voucher mất hiệu lực khi hủy một phần (như cảnh báo FE đã thông báo)
+  if (booking.orderId && remainingBookings > 0) {
+    // Kiểm tra đơn có voucher không (bất kỳ booking nào trong order có discountTotal > 0)
+    const siblingBookings = await Booking.find({
+      orderId: booking.orderId,
+      _id: { $ne: booking._id },
+      status: { $ne: BOOKING_STATUS.CANCELLED },
+    });
+
+    const orderHasVoucher = siblingBookings.some(
+      (b) => Number(b.discountTotal || 0) > 0 || b.voucherCode || b.voucherId
+    ) || Number(booking.discountTotal || 0) > 0 || booking.voucherCode || booking.voucherId;
+
+    if (orderHasVoucher) {
+      for (const sibling of siblingBookings) {
+        if (Number(sibling.discountTotal || 0) > 0) {
+          sibling.discountTotal = 0;
+          sibling.total = Math.max(0, Number(sibling.fieldAmount || 0) + Number(sibling.equipmentTotal || 0));
+          sibling.voucherCode = '';
+          sibling.voucherId = null;
+          sibling.voucherDiscount = 0;
+          await sibling.save();
+        }
+      }
+    }
+  }
+
+  await booking.save(); //  SAVE LẦN CUỐI
 
   // booking bị hủy khi chưa IN_USE/COMPLETED => trả lại kho thiết bị đã reserve
   if (![BOOKING_STATUS.IN_USE, BOOKING_STATUS.COMPLETED].includes(previousStatus)) {
