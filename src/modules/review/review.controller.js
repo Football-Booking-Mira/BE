@@ -9,7 +9,7 @@ import Booking from '../bookings/booking.models.js';
 import { BOOKING_STATUS, PAYMENT_STATUS, USER_ROLES } from '../../common/constants/enums.js';
 
 export const createReview = handleAsync(async (req, res, next) => {
-    const { bookingId, rating, comment } = req.body;
+    const { bookingId, rating, comment, isAnonymous } = req.body;
     const userId = req.user._id;
 
     const booking = await Booking.findById(bookingId);
@@ -40,6 +40,7 @@ export const createReview = handleAsync(async (req, res, next) => {
         courtId: booking.courtId,
         rating,
         comment,
+        isAnonymous: isAnonymous || false,
     });
 
     return res.json(createResponse(true, 201, 'Đánh giá thành công', review));
@@ -113,11 +114,25 @@ export const getReviewsByCourt = handleAsync(async (req, res, next) => {
         .limit(Number(limit))
         .lean();
 
+    const sanitizedReviews = reviews.map(r => {
+        if (r.isAnonymous) {
+            return {
+                ...r,
+                userId: r.userId ? {
+                    _id: r.userId._id,
+                    name: 'Người dùng ẩn danh',
+                    avatar: null
+                } : null
+            };
+        }
+        return r;
+    });
+
     const total = await Review.countDocuments(query);
 
     return res.json(
         createResponse(true, 200, 'Danh sách đánh giá của sân', {
-            reviews,
+            reviews: sanitizedReviews,
             pagination: {
                 page: Number(page),
                 limit: Number(limit),
@@ -130,7 +145,7 @@ export const getReviewsByCourt = handleAsync(async (req, res, next) => {
 
 export const updateReview = handleAsync(async (req, res, next) => {
     const reviewId = req.params.id;
-    const { rating, comment } = req.body;
+    const { rating, comment, isAnonymous } = req.body;
     const userId = req.user._id;
     const role = req.user.role;
 
@@ -143,6 +158,9 @@ export const updateReview = handleAsync(async (req, res, next) => {
 
     review.rating = rating ?? review.rating;
     review.comment = comment ?? review.comment;
+    if (typeof isAnonymous !== 'undefined') {
+        review.isAnonymous = isAnonymous;
+    }
     await review.save();
 
     return res.json(createResponse(true, 200, 'Cập nhật đánh giá thành công', review));
@@ -237,7 +255,19 @@ export const getReviewDetail = handleAsync(async (req, res, next) => {
         return next(createError(404, 'Không tìm thấy đánh giá'));
     }
 
-    return res.json(createResponse(true, 200, 'Chi tiết đánh giá', review));
+    const isAuthor = String(review.userId?._id) === String(req.user._id);
+    const isAdmin = req.user.role === 'admin';
+
+    let reviewData = review.toObject();
+    if (reviewData.isAnonymous && !isAuthor && !isAdmin) {
+        reviewData.userId = reviewData.userId ? {
+            _id: reviewData.userId._id,
+            name: 'Người dùng ẩn danh',
+            avatar: null
+        } : null;
+    }
+
+    return res.json(createResponse(true, 200, 'Chi tiết đánh giá', reviewData));
 });
 
 export const updateReviewStatus = handleAsync(async (req, res, next) => {

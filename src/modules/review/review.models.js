@@ -9,6 +9,7 @@ const reviewSchema = new mongoose.Schema({
     comment: { type: String, default: "" },
 
     status: { type: String, enum: ['active', 'hidden'], default: 'active' }, // admin có thể ẩn
+    isAnonymous: { type: Boolean, default: false },
 }, { timestamps: true });
 
 export default mongoose.model('Review', reviewSchema);
