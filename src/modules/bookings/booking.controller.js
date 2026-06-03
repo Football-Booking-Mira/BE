@@ -558,7 +558,8 @@ export const createBooking = handleAsync(async (req, res, next) => {
     if (cleanedSlots.length === 0) {
       return next(createError(400, 'Danh sách ca không hợp lệ!'));
     }
-    slotGroups = groupSlotsByContinuous(cleanedSlots);
+    // Không gộp các ca liên tục nữa, mỗi ca là một booking riêng lẻ để hỗ trợ hủy từng ca
+    slotGroups = cleanedSlots.map((s) => [s]);
   } else {
     if (!startTime || !endTime) {
       return next(createError(400, 'Thiếu giờ bắt đầu / kết thúc!'));
