@@ -3,6 +3,8 @@ import { USER_ROLES } from '../../common/constants/enums.js';
 import { authenticate, authorize } from '../../common/middlewares/auth.middleware.js';
 import validBodyRequest from '../../common/middlewares/validBodyRequest.js';
 import { bookingSchema, multiBookingSchema } from './booking.schema.js';
+import { BANK_BIN, BANK_ACCOUNT_NUMBER, BANK_ACCOUNT_NAME } from '../../common/config/environment.js';
+import Booking from './booking.models.js';
 
 import {
     createBooking, checkinBooking, checkoutBooking, confirmBooking,
@@ -130,9 +132,7 @@ routesBooking.post('/payment/vietqr', authenticate, async (req, res) => {
     // #swagger.tags = ['Bookings']
     // #swagger.summary = 'Thanh toán qua VietQR'
     try {
-        const { bookingId, amount, customer } = req.body;
-
-        const { BANK_BIN, BANK_ACCOUNT_NUMBER, BANK_ACCOUNT_NAME } = await import('../../common/config/environment.js');
+        const { bookingId, amount } = req.body;
 
         if (!BANK_BIN || !BANK_ACCOUNT_NUMBER || !BANK_ACCOUNT_NAME) {
             return res.status(500).json({
@@ -141,17 +141,23 @@ routesBooking.post('/payment/vietqr', authenticate, async (req, res) => {
             });
         }
 
-        if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+        // Nếu amount = 0 (đã thanh toán đủ), thử lấy total từ booking
+        let payAmount = Math.round(Number(amount) || 0);
+        if (payAmount <= 0 && bookingId) {
+            const bk = await Booking.findById(bookingId).lean();
+            payAmount = Math.round(Number(bk?.total) || 0);
+        }
+
+        if (!payAmount || payAmount <= 0) {
             return res.status(400).json({ success: false, message: 'Số tiền không hợp lệ!' });
         }
 
-        const payAmount = Math.round(Number(amount));
         const addInfo = `Thanh toan ${bookingId || 'booking'}`.slice(0, 50);
 
-        // Gọi VietQR API để lấy ảnh QR base64
+        // Gọi VietQR API để lấy ảnh QR
         const vietqrRes = await fetch('https://api.vietqr.io/v2/generate', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-client-id': 'antigravity', 'x-api-key': 'demo' },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 accountNo: BANK_ACCOUNT_NUMBER,
                 accountName: BANK_ACCOUNT_NAME,
