@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 const { Schema } = mongoose;
 
-export const PaymentMethodEnum = ["cash", "transfer", "momo", "vnpay", "qr"];
+export const PaymentMethodEnum = ["cash", "transfer", "momo", "vnpay", "zalopay", "qr"];
 export const PaymentStatusEnum = [
   "paid",
   "unpaid",
