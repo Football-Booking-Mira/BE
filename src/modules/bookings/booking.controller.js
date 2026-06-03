@@ -1901,12 +1901,51 @@ export const getBookings = handleAsync(async (req, res, next) => {
 
   const bookingIds = bookings.map((b) => b._id);
 
+  // Get orderIds of our bookings to query invoices for any sibling in the same order
+  const orderIds = bookings.map((b) => b.orderId ? String(b.orderId._id || b.orderId) : null).filter(Boolean);
+  const siblingMap = new Map(); // bookingId -> orderId string
+  let allRelatedBookingIds = [...bookingIds];
+
+  if (orderIds.length > 0) {
+    const siblings = await Booking.find(
+      { orderId: { $in: orderIds } },
+      { _id: 1, orderId: 1 }
+    ).lean();
+    siblings.forEach((s) => {
+      siblingMap.set(String(s._id), String(s.orderId));
+    });
+    allRelatedBookingIds = Array.from(new Set([...bookingIds, ...siblings.map((s) => s._id)]));
+  }
+
   const invoices = await InvoiceModel.find(
-    { bookingId: { $in: bookingIds } },
+    { bookingId: { $in: allRelatedBookingIds } },
     { _id: 1, bookingId: 1 }
   ).lean();
 
-  const invoiceMap = new Map(invoices.map((i) => [String(i.bookingId), String(i._id)]));
+  const invoiceMap = new Map();
+  const orderInvoiceMap = new Map();
+
+  for (const inv of invoices) {
+    const bId = String(inv.bookingId);
+    const invId = String(inv._id);
+    invoiceMap.set(bId, invId);
+
+    const ordId = siblingMap.get(bId);
+    if (ordId) {
+      orderInvoiceMap.set(ordId, invId);
+    }
+  }
+
+  // Populate invoiceMap for any sibling that shares the order invoice
+  bookings.forEach((b) => {
+    const bId = String(b._id);
+    if (invoiceMap.has(bId)) return;
+
+    const ordId = b.orderId ? String(b.orderId._id || b.orderId) : null;
+    if (ordId && orderInvoiceMap.has(ordId)) {
+      invoiceMap.set(bId, orderInvoiceMap.get(ordId));
+    }
+  });
 
   //  FIX: trả thêm canRetryPayment + amountToPay để FE khỏi đoán
   const enriched = bookings.map((b) => {
@@ -1980,18 +2019,52 @@ export const getBookingsByUser = handleAsync(async (req, res, next) => {
     });
   }
 
+  // Get orderIds of our bookings to query invoices for any sibling in the same order
+  const orderIds = bookings.map((b) => b.orderId ? String(b.orderId._id || b.orderId) : null).filter(Boolean);
+  const siblingMap = new Map(); // bookingId -> orderId string
+  let allRelatedBookingIds = [...bookingIds];
+
+  if (orderIds.length > 0) {
+    const siblings = await Booking.find(
+      { orderId: { $in: orderIds } },
+      { _id: 1, orderId: 1 }
+    ).lean();
+    siblings.forEach((s) => {
+      siblingMap.set(String(s._id), String(s.orderId));
+    });
+    allRelatedBookingIds = Array.from(new Set([...bookingIds, ...siblings.map((s) => s._id)]));
+  }
+
   const invoices = await InvoiceModel.find(
-    { bookingId: { $in: bookingIds } },
+    { bookingId: { $in: allRelatedBookingIds } },
     { _id: 1, bookingId: 1, total: 1, status: 1, paidAt: 1, createdAt: 1 }
   )
     .sort({ createdAt: -1 })
     .lean();
 
   const invoiceMap = new Map();
+  const orderInvoiceMap = new Map();
+
   for (const inv of invoices) {
-    const key = String(inv.bookingId);
-    if (!invoiceMap.has(key)) invoiceMap.set(key, inv);
+    const bId = String(inv.bookingId);
+    invoiceMap.set(bId, inv);
+
+    const ordId = siblingMap.get(bId);
+    if (ordId) {
+      orderInvoiceMap.set(ordId, inv);
+    }
   }
+
+  // Populate invoiceMap for any sibling that shares the order invoice
+  bookings.forEach((b) => {
+    const bId = String(b._id);
+    if (invoiceMap.has(bId)) return;
+
+    const ordId = b.orderId ? String(b.orderId._id || b.orderId) : null;
+    if (ordId && orderInvoiceMap.has(ordId)) {
+      invoiceMap.set(bId, orderInvoiceMap.get(ordId));
+    }
+  });
 
   const result = bookings.map((b) => {
     const id = String(b._id);
