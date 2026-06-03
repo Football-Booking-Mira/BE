@@ -129,7 +129,64 @@ routesBooking.patch('/:id/checkout',
 routesBooking.post('/payment/vietqr', authenticate, async (req, res) => {
     // #swagger.tags = ['Bookings']
     // #swagger.summary = 'Thanh toán qua VietQR'
-    res.json({ success: true });
+    try {
+        const { bookingId, amount, customer } = req.body;
+
+        const { BANK_BIN, BANK_ACCOUNT_NUMBER, BANK_ACCOUNT_NAME } = await import('../../common/config/environment.js');
+
+        if (!BANK_BIN || !BANK_ACCOUNT_NUMBER || !BANK_ACCOUNT_NAME) {
+            return res.status(500).json({
+                success: false,
+                message: 'Chưa cấu hình thông tin ngân hàng trên server!',
+            });
+        }
+
+        if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+            return res.status(400).json({ success: false, message: 'Số tiền không hợp lệ!' });
+        }
+
+        const payAmount = Math.round(Number(amount));
+        const addInfo = `Thanh toan ${bookingId || 'booking'}`.slice(0, 50);
+
+        // Gọi VietQR API để lấy ảnh QR base64
+        const vietqrRes = await fetch('https://api.vietqr.io/v2/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-client-id': 'antigravity', 'x-api-key': 'demo' },
+            body: JSON.stringify({
+                accountNo: BANK_ACCOUNT_NUMBER,
+                accountName: BANK_ACCOUNT_NAME,
+                acqId: BANK_BIN,
+                amount: payAmount,
+                addInfo,
+                format: 'text',
+                template: 'compact',
+            }),
+        });
+
+        const vietqrData = await vietqrRes.json();
+
+        if (vietqrData?.code !== '00' || !vietqrData?.data?.qrDataURL) {
+            console.error('VietQR error:', vietqrData);
+            return res.status(502).json({
+                success: false,
+                message: 'Không tạo được mã QR từ VietQR. Vui lòng thử lại!',
+            });
+        }
+
+        return res.json({
+            success: true,
+            data: {
+                qrImageBase64: vietqrData.data.qrDataURL,
+                amount: payAmount,
+                bankName: vietqrData.data.bankName || BANK_ACCOUNT_NAME,
+                accountNo: BANK_ACCOUNT_NUMBER,
+                accountName: BANK_ACCOUNT_NAME,
+            },
+        });
+    } catch (err) {
+        console.error('VietQR route error:', err);
+        return res.status(500).json({ success: false, message: 'Lỗi server khi tạo mã QR!' });
+    }
 });
 routesBooking.post('/:id/admin-cancel-cash',
     // #swagger.tags = ['Bookings']

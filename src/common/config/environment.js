@@ -21,6 +21,9 @@ export const VNP_TMN_CODE = getEnv('VNP_TMN_CODE');
 export const VNP_HASH_SECRET = getEnv('VNP_HASH_SECRET');
 export const VNP_URL = getEnv('VNP_URL');
 export const VNP_RETURN_URL = getEnv('VNP_RETURN_URL');
+export const BANK_BIN = getEnv('BANK_BIN');
+export const BANK_ACCOUNT_NUMBER = getEnv('BANK_ACCOUNT_NUMBER');
+export const BANK_ACCOUNT_NAME = getEnv('BANK_ACCOUNT_NAME');
 
 export const JWT_ACCESS_SECRET_FINAL =
     JWT_ACCESS_SECRET || 'default_secret';
