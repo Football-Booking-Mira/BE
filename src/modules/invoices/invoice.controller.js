@@ -251,6 +251,8 @@ export const getInvoiceByBooking = async (req, res) => {
                 .json({ success: false, message: 'Không tìm thấy hóa đơn cho đơn này' });
         }
 
+        const items = await InvoiceItemModel.findFullByInvoice(invoice._id);
+
         let bookingsInOrder = [];
         if (invoice && invoice.bookingId) {
             const mainBooking = invoice.bookingId;
