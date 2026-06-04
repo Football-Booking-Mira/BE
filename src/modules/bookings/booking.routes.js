@@ -184,7 +184,7 @@ routesBooking.post('/payment/vietqr', authenticate, async (req, res) => {
             data: {
                 qrImageBase64: vietqrData.data.qrDataURL,
                 amount: payAmount,
-                bankName: vietqrData.data.bankName || BANK_ACCOUNT_NAME,
+                bankName: vietqrData.data.bankName || 'TPBank',
                 accountNo: BANK_ACCOUNT_NUMBER,
                 accountName: BANK_ACCOUNT_NAME,
             },
