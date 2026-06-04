@@ -186,6 +186,7 @@ export const createInvoice = async (req, res) => {
             message: 'Tạo hóa đơn thanh toán thành công',
             invoice,
             items,
+            bookings: bookingsInOrder,
         });
     } catch (error) {
         console.error(error);
@@ -250,12 +251,24 @@ export const getInvoiceByBooking = async (req, res) => {
                 .json({ success: false, message: 'Không tìm thấy hóa đơn cho đơn này' });
         }
 
-        const items = await InvoiceItemModel.findFullByInvoice(invoice._id);
+        let bookingsInOrder = [];
+        if (invoice && invoice.bookingId) {
+            const mainBooking = invoice.bookingId;
+            if (mainBooking.orderId) {
+                bookingsInOrder = await Booking.find({
+                    orderId: mainBooking.orderId,
+                    status: { $ne: 'cancelled' },
+                }).populate('courtId', 'name').lean();
+            } else {
+                bookingsInOrder = [mainBooking];
+            }
+        }
 
         res.json({
             success: true,
             invoice,
             items,
+            bookings: bookingsInOrder,
         });
     } catch (error) {
         console.error(error);
@@ -360,7 +373,20 @@ export const getInvoiceById = async (req, res) => {
 
         const items = await InvoiceItemModel.findFullByInvoice(id);
 
-        res.json({ success: true, invoice, items });
+        let bookingsInOrder = [];
+        if (invoice && invoice.bookingId) {
+            const mainBooking = invoice.bookingId;
+            if (mainBooking.orderId) {
+                bookingsInOrder = await Booking.find({
+                    orderId: mainBooking.orderId,
+                    status: { $ne: 'cancelled' },
+                }).populate('courtId', 'name').lean();
+            } else {
+                bookingsInOrder = [mainBooking];
+            }
+        }
+
+        res.json({ success: true, invoice, items, bookings: bookingsInOrder });
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: error.message });
