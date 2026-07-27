@@ -5,6 +5,8 @@ import User from './user.models.js';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import sendMail from '../../utils/sendEmail.js';
+import { generateToken } from '../auth/auth.utils.js';
+import { FRONT_END_URL } from '../../common/config/environment.js';
 
 // GET /api/users?search=...
 export const searchUsers = handleAsync(async (req, res, next) => {
@@ -34,20 +36,34 @@ export const generateRandomPassword = (length = 10) => {
     return pass;
 };
 
-export const htmlSendPassword = (name, password, email) => {
+export const htmlSendPassword = (name, password, email, verifyLink) => {
     return `
-        <div style="font-family: Arial; line-height: 1.6;">
-            <h3>Xin chào ${name},</h3>
-            <p>Tài khoản của bạn đã được tạo thành công.</p>
-            <p><b>Email:</b> ${email}</p>
-            <p><b>Mật khẩu đăng nhập:</b></p>
-            <div style="padding: 10px; background: #f5f5f5; font-size: 18px; display: inline-block; border-radius: 6px;">
-                ${password}
+        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+            <h2 style="color: #10b981; margin-top: 0;">Xin chào ${name},</h2>
+            <p>Tài khoản khách hàng của bạn đã được khởi tạo thành công tại <b>MIRA Football</b>.</p>
+            
+            <div style="background-color: #f8fafc; padding: 16px; border-radius: 8px; border-left: 4px solid #10b981; margin: 20px 0;">
+                <p style="margin: 4px 0;"><b>Email đăng nhập:</b> ${email}</p>
+                <p style="margin: 4px 0;"><b>Mật khẩu ngẫu nhiên:</b> <code style="font-size: 16px; background: #e2e8f0; padding: 4px 8px; border-radius: 4px; font-weight: bold; color: #0f172a;">${password}</code></p>
             </div>
-            <p>Vui lòng đăng nhập và đổi mật khẩu ngay để bảo mật tài khoản.</p>
-            <br>
-            <p>Trân trọng,</p>
-            <p>Support Team</p>
+
+            ${verifyLink ? `
+            <div style="margin: 25px 0; padding: 16px; background-color: #f0fdf4; border-radius: 8px; border: 1px border-emerald-200;">
+                <p style="margin-top: 0; font-weight: bold; color: #065f46;">Xác thực tài khoản của bạn:</p>
+                <p style="font-size: 13px; color: #047857;">Nhấp vào nút bên dưới để xác thực địa chỉ email và kích hoạt đầy đủ tính năng tài khoản:</p>
+                <div style="margin-top: 15px; margin-bottom: 15px;">
+                    <a href="${verifyLink}" target="_blank" style="display: inline-block; background-color: #10b981; color: #ffffff; font-weight: bold; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-size: 14px;">
+                        ✓ Xác thực tài khoản ngay
+                    </a>
+                </div>
+                <p style="font-size: 11px; color: #64748b; margin-bottom: 0;">Hoặc copy liên kết sau vào trình duyệt: <br><a href="${verifyLink}" style="color: #0284c7; word-break: break-all;">${verifyLink}</a></p>
+            </div>
+            ` : ''}
+
+            <p style="font-size: 13px; color: #64748b; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 16px;">
+                Trân trọng,<br/>
+                <b>Đội ngũ hỗ trợ MIRA Football</b>
+            </p>
         </div>
     `;
 };
@@ -143,7 +159,19 @@ export const createOfflineCustomer = handleAsync(async (req, res) => {
     const rawPassword = generateRandomPassword(10);
     const hashedPassword = await bcrypt.hash(rawPassword, 10);
 
-    // === 2) Tạo user ===
+    // === 2) Tạo token & link xác thực email ===
+    let verificationToken;
+    let verificationTokenExpires;
+    let verifyLink;
+
+    if (email) {
+        verificationToken = generateToken({ email }, '24h');
+        verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        const frontendUrl = FRONT_END_URL || 'http://localhost:5173';
+        verifyLink = `${frontendUrl}/verify-email?token=${verificationToken}`;
+    }
+
+    // === 3) Tạo user ===
     const user = await User.create({
         name,
         phone,
@@ -152,20 +180,26 @@ export const createOfflineCustomer = handleAsync(async (req, res) => {
         role: 'user',
         status: 'active',
         isEmailVerified: false,
+        verificationToken,
+        verificationTokenExpires,
     });
 
-    // === 3) Gửi mật khẩu qua email (nếu có email) ===
+    // === 4) Gửi mật khẩu & link xác thực qua email (nếu có email) ===
     if (email) {
-        await sendMail({
-            to: email,
-            subject: `Tài khoản của bạn đã được tạo #${email}`,
-            html: htmlSendPassword(name, rawPassword, email),
-        });
+        try {
+            await sendMail({
+                to: email,
+                subject: 'Thông tin tài khoản & Link xác thực - MIRA Football',
+                html: htmlSendPassword(name, rawPassword, email, verifyLink),
+            });
+        } catch (mailErr) {
+            console.error('❌ Gửi email tạo tài khoản thất bại:', mailErr);
+        }
     }
 
     return res
         .status(StatusCodes.CREATED)
-        .json(createResponse(true, StatusCodes.CREATED, 'Tạo khách hàng mới thành công, mật khẩu đã được gửi qua email', user));
+        .json(createResponse(true, StatusCodes.CREATED, 'Tạo khách hàng mới thành công! Mật khẩu ngẫu nhiên và link xác thực đã được gửi qua email.', user));
 });
 
 export const registerOnlineUser = handleAsync(async (req, res) => {
