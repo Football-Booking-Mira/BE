@@ -61,6 +61,10 @@ const EquipmentSchema = new Schema(
             type: String,
             default: '',
         },
+        image: {
+            type: String,
+            default: '',
+        },
     },
     {
         timestamps: true,

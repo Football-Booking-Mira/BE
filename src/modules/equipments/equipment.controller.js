@@ -16,6 +16,7 @@ export const createEquipment = handleAsync(async (req, res, next) => {
         rentPrice,
         salePrice,
         description,
+        image,
     } = req.body; // đã được Zod parse sẵn
 
     if (!code || !name || !unit || !mode) {
@@ -36,6 +37,7 @@ export const createEquipment = handleAsync(async (req, res, next) => {
         rentPrice: Number(rentPrice) || 0,
         salePrice: Number(salePrice) || 0,
         description,
+        image: image || '',
     });
 
     return res.status(201).json(createResponse(true, 201, 'Tạo thiết bị thành công!', doc));

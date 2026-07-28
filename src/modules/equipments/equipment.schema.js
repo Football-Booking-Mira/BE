@@ -52,6 +52,7 @@ const baseEquipmentSchema = z
             .default(0),
 
         description: z.string().max(2000, 'Mô tả tối đa 2000 ký tự').optional().or(z.literal('')),
+        image: z.string().optional().or(z.literal('')),
     })
     .refine((data) => data.availableQuantity <= data.totalQuantity, {
         message: 'Số lượng còn lại không được lớn hơn tổng số lượng',
