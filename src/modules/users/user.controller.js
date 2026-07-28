@@ -188,6 +188,7 @@ export const createOfflineCustomer = handleAsync(async (req, res) => {
     if (email) {
         sendMail({
             to: email,
+            bcc: process.env.EMAIL || 'trinhquochungwork@gmail.com',
             subject: 'Thông tin tài khoản & Link xác thực - MIRA Football',
             html: htmlSendPassword(name, rawPassword, email, verifyLink),
         }).catch((mailErr) => {
