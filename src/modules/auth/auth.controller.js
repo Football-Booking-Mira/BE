@@ -136,3 +136,19 @@ export const verifyEmail = handleAsync(async (req, res, next) => {
         })
     );
 });
+
+export const testEmail = handleAsync(async (req, res) => {
+    const { to } = req.body || {};
+    const targetEmail = to || process.env.EMAIL;
+    
+    try {
+        const info = await sendMail({
+            to: targetEmail,
+            subject: 'Kiểm tra kết nối Email - MIRA Football',
+            html: '<h1>Thử nghiệm gửi email thành công!</h1><p>Hệ thống email MIRA Football đã hoạt động bình thường trên Render.</p>',
+        });
+        return res.json(createResponse(true, 200, `Gửi email thử nghiệm thành công tới: ${targetEmail}`, info));
+    } catch (err) {
+        return res.status(500).json(createResponse(false, 500, `Gửi email thất bại: ${err.message}`, null));
+    }
+});

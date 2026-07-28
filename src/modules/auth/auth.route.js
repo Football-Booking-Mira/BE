@@ -1,7 +1,7 @@
 import { Router } from "express";
 import validBodyRequest from "../../common/middlewares/validBodyRequest.js";
 import { authenticate } from "../../common/middlewares/auth.middleware.js";
-import { forgotPassword, login, register, resetPassword, verifyEmail, verifyResetToken, getMe, logout } from "./auth.controller.js";
+import { forgotPassword, login, register, resetPassword, verifyEmail, verifyResetToken, getMe, logout, testEmail } from "./auth.controller.js";
 import { loginValidation, registerValidation } from "./auth.validation.js";
 
 import { authRateLimiter } from "../../common/middlewares/rateLimit.middleware.js";
@@ -59,6 +59,12 @@ authRouter.post("/verify-email",
     // #swagger.tags = ['Auth']
     // #swagger.summary = 'Xác thực email'
     verifyEmail
+);
+
+authRouter.post("/test-email",
+    // #swagger.tags = ['Auth']
+    // #swagger.summary = 'Kiểm tra kết nối gửi email'
+    testEmail
 );
 
 export default authRouter;
