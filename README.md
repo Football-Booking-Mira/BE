@@ -1,6 +1,19 @@
 #  MIRA Football - Backend API
 > Hệ thống API quản lý đặt sân bóng đá trực tuyến.
+
 ---
+
+##  Tài khoản Demo (Demo Credentials)
+
+Bạn có thể sử dụng các tài khoản demo dưới đây để thử nghiệm hệ thống:
+
+| Vai trò (Role) | Email | Mật khẩu (Password) | Ghi chú (Note) |
+| :--- | :--- | :--- | :--- |
+| **Quản trị viên (Admin)** | `admin@gmail.com` | `admin123` | Quản lý sân bóng, đặt sân, doanh thu... |
+| **Khách hàng (User)** | `user@gmail.com` | `admin123` | Tìm kiếm sân, đặt lịch, thanh toán... |
+
+---
+
 ##  Yêu cầu
 
 - **Node.js** >= 18
