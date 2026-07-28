@@ -184,17 +184,15 @@ export const createOfflineCustomer = handleAsync(async (req, res) => {
         verificationTokenExpires,
     });
 
-    // === 4) Gửi mật khẩu & link xác thực qua email (nếu có email) ===
+    // === 4) Gửi mật khẩu & link xác thực qua email (nếu có email) - Chạy background không làm treo request ===
     if (email) {
-        try {
-            await sendMail({
-                to: email,
-                subject: 'Thông tin tài khoản & Link xác thực - MIRA Football',
-                html: htmlSendPassword(name, rawPassword, email, verifyLink),
-            });
-        } catch (mailErr) {
-            console.error('❌ Gửi email tạo tài khoản thất bại:', mailErr);
-        }
+        sendMail({
+            to: email,
+            subject: 'Thông tin tài khoản & Link xác thực - MIRA Football',
+            html: htmlSendPassword(name, rawPassword, email, verifyLink),
+        }).catch((mailErr) => {
+            console.error('❌ Gửi email tạo tài khoản thất bại:', mailErr?.message || mailErr);
+        });
     }
 
     return res

@@ -35,11 +35,11 @@ export const register = handleAsync(async (req, res, next) => {
     const response = await registerService(payload);
 
     const link = `${FRONT_END_URL}/verify-email?token=${response.verificationToken}`;
-    await sendMail({
+    sendMail({
         to: response.user.email,
         subject: 'Xác thực email để kích hoạt tài khoản',
         html: htmlVerify(response.user.email, response.user.name, link),
-    });
+    }).catch((err) => console.error('❌ Email dispatch error:', err?.message || err));
 
     return res
         .status(StatusCodes.CREATED)
@@ -90,11 +90,11 @@ export const forgotPassword = handleAsync(async (req, res, next) => {
     const { email } = req.body;
     const result = await forgotPasswordService(email);
     const link = `${FRONT_END_URL}/verify?token=${result.resetToken}`;
-    await sendMail({
+    sendMail({
         to: email,
         subject: 'Xác nhận đặt lại mật khẩu',
         html: htmlForgot(email, result.user.name, link),
-    });
+    }).catch((err) => console.error('❌ Email dispatch error:', err?.message || err));
     return res
         .status(StatusCodes.OK)
         .json(
