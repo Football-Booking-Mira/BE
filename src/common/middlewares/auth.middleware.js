@@ -1,8 +1,14 @@
 import createResponse from '../../utils/responses.js';
 import { USER_ROLES } from '../constants/enums.js';
 import { verifyToken } from '../../modules/auth/auth.utils.js';
+import User from '../../modules/users/user.models.js';
 
-const getTokenFromHeader = (req) => {
+const getTokenFromReq = (req) => {
+    // 1. Prioritize HttpOnly cookie
+    if (req.cookies && req.cookies.access_token) {
+        return req.cookies.access_token;
+    }
+    // 2. Fallback to Authorization Header
     const authHeader = req.headers.authorization || req.headers.Authorization;
     if (!authHeader) return null;
     const parts = authHeader.split(' ');
@@ -12,27 +18,46 @@ const getTokenFromHeader = (req) => {
     return token;
 };
 
-export const authenticate = (req, res, next) => {
-    const token = getTokenFromHeader(req);
+export const authenticate = async (req, res, next) => {
+    const token = getTokenFromReq(req);
 
     if (!token || token === 'undefined' || token === 'null') {
-        console.log('❌ No token or invalid token string from client:', token);
         return res
             .status(401)
-            .json(createResponse(false, 401, 'Unauthorized: token missing', null));
+            .json(createResponse(false, 401, 'Unauthorized: Chưa xác thực phiên đăng nhập', null));
     }
 
     try {
-        //console.log('Verifying token:', token.slice(0, 30) + '...');
         const payload = verifyToken(token); // { _id, role, iat, exp }
-        //  console.log('Token payload:', payload);
-        req.user = payload;
+
+        //  Database Lookup: Ensure user exists and is active (chống token cũ/bị khóa)
+        const dbUser = await User.findById(payload._id).select('_id role status email name').lean();
+        if (!dbUser) {
+            return res
+                .status(401)
+                .json(createResponse(false, 401, 'Unauthorized: Tài khoản không tồn tại', null));
+        }
+
+        if (dbUser.status !== 'active') {
+            return res
+                .status(401)
+                .json(createResponse(false, 401, 'Unauthorized: Tài khoản của bạn đã bị khóa hoặc chưa kích hoạt', null));
+        }
+
+        // Attach verified MongoDB user data (not relying solely on payload)
+        req.user = {
+            _id: dbUser._id,
+            role: dbUser.role,
+            status: dbUser.status,
+            email: dbUser.email,
+            name: dbUser.name,
+        };
+
         return next();
     } catch (error) {
-        console.error('❌ JWT verify error:', error.message);
         return res
             .status(401)
-            .json(createResponse(false, 401, 'Unauthorized: token invalid', null));
+            .json(createResponse(false, 401, 'Unauthorized: Token không hợp lệ hoặc đã hết hạn', null));
     }
 };
 
@@ -45,7 +70,7 @@ export const authorize =
         if (!user || !user.role) {
             return res
                 .status(403)
-                .json(createResponse(false, 403, 'Forbidden: missing user role', null));
+                .json(createResponse(false, 403, 'Forbidden: Thiếu thông tin quyền người dùng', null));
         }
 
         if (allowedRoles.includes(user.role)) return next();
@@ -55,7 +80,7 @@ export const authorize =
 
         return res
             .status(403)
-            .json(createResponse(false, 403, 'Forbidden: insufficient permissions', null));
+            .json(createResponse(false, 403, 'Forbidden: Bạn không có quyền truy cập tài nguyên này', null));
     };
 
 export default { authenticate, authorize };

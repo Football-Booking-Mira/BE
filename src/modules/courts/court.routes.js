@@ -12,7 +12,8 @@ import {
 import validBodyrequest from '../../common/middlewares/validBodyRequest.js';
 import { courtSchema, updateCourtSchema } from './court.schema.js';
 import upload from '../../common/middlewares/upload.middleware.js';
-
+import { authenticate, authorize } from '../../common/middlewares/auth.middleware.js';
+import { USER_ROLES } from '../../common/constants/enums.js';
 
 const routesCourt = Router();
 
@@ -31,11 +32,14 @@ routesCourt.get('/search', async (req, res) => {
 
         // Tạo điều kiện lọc
         const filter = {};
-        if (name) filter.name = { $regex: name, $options: 'i' }; // tìm gần đúng (không phân biệt hoa thường)
+        if (name && typeof name === 'string') {
+            const cleanName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // Sanitize regex input
+            filter.name = { $regex: cleanName, $options: 'i' };
+        }
         if (minPrice || maxPrice) {
             filter.basePrice = {};
-            if (minPrice) filter.basePrice.$gte = Number(minPrice);
-            if (maxPrice) filter.basePrice.$lte = Number(maxPrice);
+            if (minPrice && !isNaN(Number(minPrice))) filter.basePrice.$gte = Number(minPrice);
+            if (maxPrice && !isNaN(Number(maxPrice))) filter.basePrice.$lte = Number(maxPrice);
         }
 
         const courts = await Court.find(filter);
@@ -51,21 +55,25 @@ routesCourt.get('/:id',
     getDetailCourt
 );
 
+// Protected Admin Mutation Routes
 routesCourt.delete('/:id',
     // #swagger.tags = ['Courts']
     // #swagger.summary = 'Xóa sân theo ID'
+    authenticate, authorize(USER_ROLES.ADMIN),
     deleteCourt
 );
 
 routesCourt.delete('/soft-delete/:id',
     // #swagger.tags = ['Courts']
     // #swagger.summary = 'Xóa mềm sân theo ID'
+    authenticate, authorize(USER_ROLES.ADMIN),
     softDeleteCourt
 );
 
 routesCourt.post('/',
     // #swagger.tags = ['Courts']
     // #swagger.summary = 'Tạo sân mới'
+    authenticate, authorize(USER_ROLES.ADMIN),
     upload.array('images', 10),
     validBodyrequest(courtSchema),
     createCourt
@@ -74,6 +82,7 @@ routesCourt.post('/',
 routesCourt.patch('/:id',
     // #swagger.tags = ['Courts']
     // #swagger.summary = 'Cập nhật thông tin sân'
+    authenticate, authorize(USER_ROLES.ADMIN),
     upload.array('images', 10),
     validBodyrequest(updateCourtSchema),
     updateCourt
@@ -83,6 +92,7 @@ routesCourt.patch('/:id',
 routesCourt.patch('/maintenance/:id',
     // #swagger.tags = ['Courts']
     // #swagger.summary = 'Cập nhật trạng thái bảo trì sân'
+    authenticate, authorize(USER_ROLES.ADMIN),
     updateCourtMaintenance
 );
 

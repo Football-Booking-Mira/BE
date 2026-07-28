@@ -1,13 +1,17 @@
 import { Router } from "express";
 import validBodyRequest from "../../common/middlewares/validBodyRequest.js";
-import { forgotPassword, login, register, resetPassword, verifyEmail, verifyResetToken } from "./auth.controller.js";
+import { authenticate } from "../../common/middlewares/auth.middleware.js";
+import { forgotPassword, login, register, resetPassword, verifyEmail, verifyResetToken, getMe, logout } from "./auth.controller.js";
 import { loginValidation, registerValidation } from "./auth.validation.js";
+
+import { authRateLimiter } from "../../common/middlewares/rateLimit.middleware.js";
 
 const authRouter = Router();
 
 authRouter.post("/register",
     // #swagger.tags = ['Auth']
     // #swagger.summary = 'Đăng ký tài khoản mới'
+    authRateLimiter,
     validBodyRequest(registerValidation),
     register
 );
@@ -15,7 +19,22 @@ authRouter.post("/register",
 authRouter.post("/login",
     // #swagger.tags = ['Auth']
     // #swagger.summary = 'Đăng nhập'
+    authRateLimiter,
+    validBodyRequest(loginValidation),
     login
+);
+
+authRouter.get("/me",
+    // #swagger.tags = ['Auth']
+    // #swagger.summary = 'Lấy thông tin người dùng hiện tại'
+    authenticate,
+    getMe
+);
+
+authRouter.post("/logout",
+    // #swagger.tags = ['Auth']
+    // #swagger.summary = 'Đăng xuất'
+    logout
 );
 
 authRouter.post("/forgot-password",

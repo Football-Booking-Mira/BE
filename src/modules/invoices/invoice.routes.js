@@ -4,25 +4,26 @@ import { USER_ROLES } from '../../common/constants/enums.js';
 import { createInvoice, getInvoiceByBooking, getInvoiceById, getInvoices, updateInvoiceStatus, adjustInvoiceFieldPrice } from './invoice.controller.js';
 
 const routesInvoices = Router();
+
 routesInvoices.post('/',
     // #swagger.tags = ['Invoices']
     // #swagger.summary = 'Tạo hóa đơn mới'
-    createInvoice
+    authenticate, authorize(USER_ROLES.ADMIN), createInvoice
 );
 routesInvoices.get('/',
     // #swagger.tags = ['Invoices']
     // #swagger.summary = 'Lấy danh sách hóa đơn'
-    getInvoices
+    authenticate, authorize(USER_ROLES.ADMIN), getInvoices
 );
 routesInvoices.get('/by-booking/:bookingId',
     // #swagger.tags = ['Invoices']
     // #swagger.summary = 'Lấy hóa đơn theo đơn đặt sân'
-    getInvoiceByBooking
+    authenticate, getInvoiceByBooking
 );
 routesInvoices.get('/:id',
     // #swagger.tags = ['Invoices']
     // #swagger.summary = 'Lấy chi tiết hóa đơn theo ID'
-    getInvoiceById
+    authenticate, getInvoiceById
 );
 routesInvoices.patch('/:id/adjust-field',
     // #swagger.tags = ['Invoices']
@@ -32,7 +33,7 @@ routesInvoices.patch('/:id/adjust-field',
 routesInvoices.patch('/:id',
     // #swagger.tags = ['Invoices']
     // #swagger.summary = 'Cập nhật trạng thái hóa đơn'
-    updateInvoiceStatus
+    authenticate, authorize(USER_ROLES.ADMIN), updateInvoiceStatus
 );
 
 export default routesInvoices;

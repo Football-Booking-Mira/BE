@@ -12,9 +12,27 @@ import sendMail from '../../utils/sendEmail.js';
 import { htmlForgot, htmlVerify } from '../../utils/renderHMTLTemp.js';
 import createResponse from '../../utils/responses.js';
 import { FRONT_END_URL } from '../../common/config/environment.js';
+import User from '../users/user.models.js';
+
+const isProduction = process.env.NODE_ENV === 'production';
+
+// Cookie configuration options
+export const COOKIE_OPTIONS = {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'lax',
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+    path: '/',
+};
 
 export const register = handleAsync(async (req, res, next) => {
-    const response = await registerService(req.body);
+    // Force role to user to prevent mass assignment vulnerability
+    const payload = {
+        ...req.body,
+        role: 'user',
+    };
+
+    const response = await registerService(payload);
 
     const link = `${FRONT_END_URL}/verify-email?token=${response.verificationToken}`;
     await sendMail({
@@ -36,10 +54,36 @@ export const register = handleAsync(async (req, res, next) => {
 });
 
 export const login = handleAsync(async (req, res, next) => {
-    const data = await loginService(req.body); // { user, accessToken }
+    const data = await loginService(req.body); // { user, token }
+    
+    // Attach HttpOnly cookie
+    res.cookie('access_token', data.token, COOKIE_OPTIONS);
+
     return res
         .status(StatusCodes.OK)
         .json(createResponse(true, StatusCodes.OK, 'Đăng nhập thành công', data));
+});
+
+export const getMe = handleAsync(async (req, res, next) => {
+    const user = await User.findById(req.user._id).select('-password');
+    if (!user) {
+        return res
+            .status(StatusCodes.NOT_FOUND)
+            .json(createResponse(false, StatusCodes.NOT_FOUND, 'Không tìm thấy người dùng'));
+    }
+    return res
+        .status(StatusCodes.OK)
+        .json(createResponse(true, StatusCodes.OK, 'Lấy thông tin người dùng thành công', user));
+});
+
+export const logout = handleAsync(async (req, res, next) => {
+    res.clearCookie('access_token', {
+        ...COOKIE_OPTIONS,
+        maxAge: 0,
+    });
+    return res
+        .status(StatusCodes.OK)
+        .json(createResponse(true, StatusCodes.OK, 'Đăng xuất thành công'));
 });
 
 export const forgotPassword = handleAsync(async (req, res, next) => {
@@ -58,7 +102,7 @@ export const forgotPassword = handleAsync(async (req, res, next) => {
                 true,
                 StatusCodes.OK,
                 'Đã gửi link reset mật khẩu đến email của bạn! ' + result.email,
-                result
+                { email: result.email }
             )
         );
 });
@@ -80,7 +124,11 @@ export const verifyResetToken = handleAsync(async (req, res, next) => {
 export const verifyEmail = handleAsync(async (req, res, next) => {
     const { verificationToken } = req.body;
     const result = await verifyEmailService(verificationToken);
-    // result = { message, user, token }
+
+    if (result.token) {
+        res.cookie('access_token', result.token, COOKIE_OPTIONS);
+    }
+
     return res.status(StatusCodes.OK).json(
         createResponse(true, StatusCodes.OK, result.message, {
             user: result.user,

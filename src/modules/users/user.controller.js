@@ -247,6 +247,17 @@ export const registerOnlineUser = handleAsync(async (req, res) => {
 
 export const getUserDetail = handleAsync(async (req, res) => {
     const { id } = req.params;
+    const currentUser = req.user;
+
+    // Ownership & Admin privilege check
+    const isOwner = currentUser && currentUser._id.toString() === id;
+    const isAdmin = currentUser && currentUser.role === 'admin';
+
+    if (!isOwner && !isAdmin) {
+        return res.status(StatusCodes.FORBIDDEN).json(
+            createResponse(false, StatusCodes.FORBIDDEN, 'Bạn không có quyền truy cập thông tin tài khoản này!')
+        );
+    }
 
     // lấy user (select password = false)
     const user = await User.findById(id).select('-password');

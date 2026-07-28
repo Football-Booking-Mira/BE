@@ -23,7 +23,7 @@ userRouter.post('/sign-up',
 userRouter.get('/:id',
     // #swagger.tags = ['Users']
     // #swagger.summary = 'Lấy chi tiết người dùng'
-    getUserDetail
+    authenticate, getUserDetail
 );
 userRouter.put('/:id',
     // #swagger.tags = ['Users']

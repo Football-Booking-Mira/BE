@@ -185,7 +185,7 @@ export const deleteReview = handleAsync(async (req, res, next) => {
 
 export const getFieldsNeedReview = async (req, res) => {
     try {
-        const userId = req.params.id;
+        const userId = req.user._id;
 
         // 1. Booking completed + paid
         const bookings = await Booking.find({
