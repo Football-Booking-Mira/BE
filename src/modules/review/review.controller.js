@@ -7,10 +7,15 @@ import createResponse from '../../utils/responses.js';
 import Review from './review.models.js';
 import Booking from '../bookings/booking.models.js';
 import { BOOKING_STATUS, PAYMENT_STATUS, USER_ROLES } from '../../common/constants/enums.js';
+import { isValidObjectId } from '../../utils/validation.utils.js';
 
 export const createReview = handleAsync(async (req, res, next) => {
     const { bookingId, rating, comment, isAnonymous } = req.body;
     const userId = req.user._id;
+
+    if (!isValidObjectId(bookingId)) {
+        return next(createError(400, 'bookingId không hợp lệ'));
+    }
 
     const booking = await Booking.findById(bookingId);
     if (!booking) return next(createError(404, 'Không tìm thấy booking'));
@@ -38,8 +43,8 @@ export const createReview = handleAsync(async (req, res, next) => {
         bookingId,
         userId,
         courtId: booking.courtId,
-        rating,
-        comment,
+        rating: Math.min(5, Math.max(1, Number(rating) || 5)),
+        comment: comment ? String(comment).trim() : '',
         isAnonymous: isAnonymous || false,
     });
 
@@ -61,7 +66,7 @@ export const adminGetReviews = handleAsync(async (req, res, next) => {
 
     const query = {};
     if (status) query.status = status; // active | hidden
-    if (courtId) query.courtId = courtId;
+    if (courtId && isValidObjectId(courtId)) query.courtId = courtId;
 
     // lấy hết rồi lọc
     const raw = await Review.find(query)
@@ -71,7 +76,7 @@ export const adminGetReviews = handleAsync(async (req, res, next) => {
         .sort({ createdAt: -1 })
         .lean();
 
-    //  bỏ review mồ côi
+    // bỏ review mồ côi
     const cleaned = raw.filter((r) => r.bookingId);
 
     const total = cleaned.length;
@@ -97,8 +102,8 @@ export const getReviewsByCourt = handleAsync(async (req, res, next) => {
     const { courtId } = req.params;
     const { page = 1, limit = 10 } = req.query;
 
-    if (!courtId) {
-        return next(createError(400, 'Thiếu courtId'));
+    if (!courtId || !isValidObjectId(courtId)) {
+        return next(createError(400, 'ID sân không hợp lệ'));
     }
 
     const query = {
@@ -145,6 +150,10 @@ export const getReviewsByCourt = handleAsync(async (req, res, next) => {
 
 export const updateReview = handleAsync(async (req, res, next) => {
     const reviewId = req.params.id;
+    if (!isValidObjectId(reviewId)) {
+        return next(createError(400, 'ID review không hợp lệ'));
+    }
+
     const { rating, comment, isAnonymous } = req.body;
     const userId = req.user._id;
     const role = req.user.role;
@@ -156,10 +165,10 @@ export const updateReview = handleAsync(async (req, res, next) => {
         return next(createError(403, 'Không có quyền sửa đánh giá này'));
     }
 
-    review.rating = rating ?? review.rating;
-    review.comment = comment ?? review.comment;
+    if (rating !== undefined) review.rating = Math.min(5, Math.max(1, Number(rating) || 5));
+    if (comment !== undefined) review.comment = String(comment).trim();
     if (typeof isAnonymous !== 'undefined') {
-        review.isAnonymous = isAnonymous;
+        review.isAnonymous = Boolean(isAnonymous);
     }
     await review.save();
 
@@ -168,6 +177,10 @@ export const updateReview = handleAsync(async (req, res, next) => {
 
 export const deleteReview = handleAsync(async (req, res, next) => {
     const reviewId = req.params.id;
+    if (!isValidObjectId(reviewId)) {
+        return next(createError(400, 'ID review không hợp lệ'));
+    }
+
     const userId = req.user._id;
     const role = req.user.role;
 
@@ -185,7 +198,12 @@ export const deleteReview = handleAsync(async (req, res, next) => {
 
 export const getFieldsNeedReview = async (req, res) => {
     try {
+        const { id } = req.params;
         const userId = req.user._id;
+
+        if (id && isValidObjectId(id) && req.user.role !== 'admin' && String(id) !== String(userId)) {
+            return res.status(403).json({ message: 'Bạn không có quyền xem thông tin của người dùng khác' });
+        }
 
         // 1. Booking completed + paid
         const bookings = await Booking.find({
@@ -214,7 +232,6 @@ export const getFieldsNeedReview = async (req, res) => {
             .select('_id bookingId')
             .lean();
 
-        // map bookingId -> reviewId
         const reviewMap = {};
         reviews.forEach((r) => {
             reviewMap[r.bookingId.toString()] = r._id;
@@ -225,7 +242,7 @@ export const getFieldsNeedReview = async (req, res) => {
             .filter((b) => reviewMap[b._id.toString()])
             .map((b) => ({
                 ...b,
-                reviewId: reviewMap[b._id.toString()], // ⭐ QUAN TRỌNG
+                reviewId: reviewMap[b._id.toString()],
             }));
 
         const unreviewedCourts = bookings.filter((b) => !reviewMap[b._id.toString()]);
@@ -245,6 +262,9 @@ export const getFieldsNeedReview = async (req, res) => {
 
 export const getReviewDetail = handleAsync(async (req, res, next) => {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+        return next(createError(400, 'ID đánh giá không hợp lệ'));
+    }
 
     const review = await Review.findById(id)
         .populate('courtId', '_id name type images location')
@@ -257,6 +277,10 @@ export const getReviewDetail = handleAsync(async (req, res, next) => {
 
     const isAuthor = String(review.userId?._id) === String(req.user._id);
     const isAdmin = req.user.role === 'admin';
+
+    if (!isAuthor && !isAdmin) {
+        return next(createError(403, 'Bạn không có quyền xem chi tiết đánh giá này'));
+    }
 
     let reviewData = review.toObject();
     if (reviewData.isAnonymous && !isAuthor && !isAdmin) {
@@ -272,8 +296,11 @@ export const getReviewDetail = handleAsync(async (req, res, next) => {
 
 export const updateReviewStatus = handleAsync(async (req, res, next) => {
     const { id } = req.params;
+    if (!isValidObjectId(id)) {
+        return next(createError(400, 'ID đánh giá không hợp lệ'));
+    }
+
     const { status } = req.body;
-    // đúng schema enum: active | hidden
     if (!['active', 'hidden'].includes(status)) {
         return next(createError(400, 'Trạng thái không hợp lệ'));
     }

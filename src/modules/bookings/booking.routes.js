@@ -5,6 +5,7 @@ import validBodyRequest from '../../common/middlewares/validBodyRequest.js';
 import { bookingSchema, multiBookingSchema } from './booking.schema.js';
 import { BANK_BIN, BANK_ACCOUNT_NUMBER, BANK_ACCOUNT_NAME } from '../../common/config/environment.js';
 import Booking from './booking.models.js';
+import { isValidObjectId } from '../../utils/validation.utils.js';
 
 import {
     createBooking, checkinBooking, checkoutBooking, confirmBooking,
@@ -132,7 +133,11 @@ routesBooking.post('/payment/vietqr', authenticate, async (req, res) => {
     // #swagger.tags = ['Bookings']
     // #swagger.summary = 'Thanh toán qua VietQR'
     try {
-        const { bookingId, amount } = req.body;
+        const { bookingId } = req.body;
+
+        if (!bookingId || !isValidObjectId(bookingId)) {
+            return res.status(400).json({ success: false, message: 'bookingId không hợp lệ!' });
+        }
 
         if (!BANK_BIN || !BANK_ACCOUNT_NUMBER || !BANK_ACCOUNT_NAME) {
             return res.status(500).json({
@@ -141,18 +146,30 @@ routesBooking.post('/payment/vietqr', authenticate, async (req, res) => {
             });
         }
 
-        // Nếu amount = 0 (đã thanh toán đủ), thử lấy total từ booking
-        let payAmount = Math.round(Number(amount) || 0);
-        if (payAmount <= 0 && bookingId) {
-            const bk = await Booking.findById(bookingId).lean();
-            payAmount = Math.round(Number(bk?.total) || 0);
+        const bk = await Booking.findById(bookingId).lean();
+        if (!bk) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy đơn đặt sân!' });
         }
+
+        // Ownership Check: User must own the booking or be admin
+        if (req.user && req.user.role !== USER_ROLES.ADMIN) {
+            const callerId = req.user.id || req.user._id?.toString();
+            if (bk.customerId && bk.customerId.toString() !== callerId) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Bạn không có quyền tạo mã thanh toán cho đơn hàng của người khác!',
+                });
+            }
+        }
+
+        // Always use total amount calculated and stored in database
+        const payAmount = Math.round(Number(bk.total) || 0);
 
         if (!payAmount || payAmount <= 0) {
             return res.status(400).json({ success: false, message: 'Số tiền không hợp lệ!' });
         }
 
-        const addInfo = `Thanh toan ${bookingId || 'booking'}`.slice(0, 50);
+        const addInfo = `Thanh toan ${bk.code || bookingId}`.slice(0, 50);
 
         // Gọi VietQR API để lấy ảnh QR
         const vietqrRes = await fetch('https://api.vietqr.io/v2/generate', {

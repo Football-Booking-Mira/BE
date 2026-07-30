@@ -1989,10 +1989,15 @@ export const getBookings = handleAsync(async (req, res, next) => {
 
 //* GET BY USER
 export const getBookingsByUser = handleAsync(async (req, res, next) => {
-  const userId = req.params.userId || req.user?._id;
-  if (!userId) return next(createError(400, 'Thiếu userId!'));
+  const targetUserId = req.params.userId || req.user?.id || req.user?._id;
+  if (!targetUserId) return next(createError(400, 'Thiếu userId!'));
 
-  const bookings = await Booking.find({ customerId: userId })
+  const callerId = req.user?.id || req.user?._id?.toString();
+  if (req.user?.role !== USER_ROLES.ADMIN && String(targetUserId) !== String(callerId)) {
+    return next(createError(403, 'Bạn không có quyền xem danh sách đơn hàng của người dùng khác!'));
+  }
+
+  const bookings = await Booking.find({ customerId: targetUserId })
     .populate('courtId', 'name type images image address')
     .populate('customerId', 'name username phone email')
     .populate('voucherId', 'code discountType discountValue maxDiscountValue')
@@ -2158,6 +2163,17 @@ export const getRetryPaymentInfo = async (req, res, next) => {
     const booking = await Booking.findById(bookingId).lean();
     if (!booking) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy booking' });
+    }
+
+    // Ownership Check: Caller must own the booking or be admin
+    if (req.user && req.user.role !== USER_ROLES.ADMIN) {
+      const callerId = req.user.id || req.user._id?.toString();
+      if (booking.customerId && String(booking.customerId) !== String(callerId)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Bạn không có quyền xem thông tin thanh toán của đơn hàng này.',
+        });
+      }
     }
 
     // chỉ retry cho đơn online

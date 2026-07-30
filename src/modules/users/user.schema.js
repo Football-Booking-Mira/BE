@@ -9,7 +9,6 @@ export const createCustomerSchema = z.object({
     phone: z
         .string({ message: 'Số điện thoại là bắt buộc!' })
         .regex(/^0\d{9}$/, 'Số điện thoại phải bao gồm đúng 10 chữ số (bắt đầu bằng số 0)!'),
-    // email không bắt buộc nhưng phải đúng định dạng nếu nhập
     email: z
         .string({ message: 'Email sai định dạng!' })
         .email('Email không đúng định dạng!')
@@ -17,13 +16,12 @@ export const createCustomerSchema = z.object({
         .or(z.literal('')),
 });
 
-
 export const createCustomerOnlineSchema = yup.object({
     name: yup.string().required(),
     email: yup.string().email().required(),
     phone: yup.string().nullable(),
     password: yup.string().required().min(6),
-    role: yup.string().oneOf(['user', 'admin']).default('user'),
+    role: yup.string().oneOf(['user']).default('user'),
 });
 
 export const registerOnlineSchema = z.object({

@@ -20,16 +20,20 @@ import {
     VNP_HASH_SECRET,
     VNP_RETURN_URL,
     FRONT_END_URL,
+    ZALOPAY_APP_ID,
+    ZALOPAY_KEY1,
+    ZALOPAY_KEY2,
+    ZALOPAY_ENDPOINT,
 } from '../../common/config/environment.js';
 
 import { commitVoucherUsage, rollbackVoucherUsage } from '../vouchers/voucher.service.js';
 
-// --- Cấu hình ZaloPay Sandbox (mặc định) ---
+// --- ZaloPay Configuration from Environment ---
 const ZALOPAY_CONFIG = {
-  app_id: "2553",
-  key1: "PcY4iZIKFCIdgZvA6ueMcMHHUbRLYjPL",
-  key2: "kLtgPl8YESDkOklk1AOWG7aP8TAlA1hL",
-  endpoint: "https://sb-openapi.zalopay.vn/v2/create"
+    app_id: ZALOPAY_APP_ID || "2553",
+    key1: ZALOPAY_KEY1 || "PcY4iZIKFCIdgZvA6ueMcMHHUbRLYjPL",
+    key2: ZALOPAY_KEY2 || "kLtgPl8YESDkOklk1AOWG7aP8TAlA1hL",
+    endpoint: ZALOPAY_ENDPOINT || "https://sb-openapi.zalopay.vn/v2/create",
 };
 
 // Tỉ lệ cọc so với TỔNG (field + equipment - discount)
@@ -195,6 +199,20 @@ export const createVnpayPayment = async (req, res, next) => {
         const bookings = await Booking.find({ _id: { $in: ids } });
         if (!bookings || bookings.length === 0) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy booking' });
+        }
+
+        // Ownership Check: Caller must own the bookings or be an admin
+        if (req.user && req.user.role !== 'admin') {
+            const callerId = req.user.id || req.user._id?.toString();
+            const unauthorized = bookings.find(
+                (b) => b.customerId && b.customerId.toString() !== callerId
+            );
+            if (unauthorized) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Bạn không có quyền thực hiện thanh toán cho đơn hàng của người khác.',
+                });
+            }
         }
 
         //  CHẶN: đơn đã có hóa đơn => coi như đã thanh toán/chốt, không cho tạo link thanh toán lại
@@ -686,6 +704,20 @@ export const createZalopayPayment = async (req, res, next) => {
         const bookings = await Booking.find({ _id: { $in: ids } });
         if (!bookings || bookings.length === 0) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy booking' });
+        }
+
+        // Ownership Check: Caller must own the bookings or be an admin
+        if (req.user && req.user.role !== 'admin') {
+            const callerId = req.user.id || req.user._id?.toString();
+            const unauthorized = bookings.find(
+                (b) => b.customerId && b.customerId.toString() !== callerId
+            );
+            if (unauthorized) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Bạn không có quyền thực hiện thanh toán cho đơn hàng của người khác.',
+                });
+            }
         }
 
         // Chặn đơn đã có hoá đơn

@@ -8,30 +8,34 @@ import sendMail from '../../utils/sendEmail.js';
 import { generateToken } from '../auth/auth.utils.js';
 import { FRONT_END_URL } from '../../common/config/environment.js';
 
+import { isValidObjectId, sanitizeRegex } from '../../utils/validation.utils.js';
+
 // GET /api/users?search=...
 export const searchUsers = handleAsync(async (req, res, next) => {
     const { search } = req.query;
 
     let query = {};
     if (search && String(search).trim() !== '') {
-        const regex = new RegExp(String(search).trim(), 'i');
+        const cleanSearch = sanitizeRegex(String(search).trim());
+        const regex = new RegExp(cleanSearch, 'i');
         query = {
             $or: [{ name: regex }, { phone: regex }, { email: regex }],
         };
     }
 
-    const users = await User.find(query).sort({ createdAt: -1 });
+    const users = await User.find(query).select('-password -verificationToken -resetPasswordToken').sort({ createdAt: -1 });
 
     return res
         .status(StatusCodes.OK)
         .json(createResponse(true, StatusCodes.OK, 'Lấy danh sách khách hàng thành công', users));
 });
 
-export const generateRandomPassword = (length = 10) => {
+export const generateRandomPassword = (length = 12) => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$!';
+    const bytes = crypto.randomBytes(length);
     let pass = '';
     for (let i = 0; i < length; i++) {
-        pass += chars.charAt(Math.floor(Math.random() * chars.length));
+        pass += chars.charAt(bytes[i] % chars.length);
     }
     return pass;
 };

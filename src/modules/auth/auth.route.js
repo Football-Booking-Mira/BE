@@ -1,7 +1,7 @@
 import { Router } from "express";
 import validBodyRequest from "../../common/middlewares/validBodyRequest.js";
-import { authenticate } from "../../common/middlewares/auth.middleware.js";
-import { forgotPassword, login, register, resetPassword, verifyEmail, verifyResetToken, getMe, logout, testEmail } from "./auth.controller.js";
+import { authenticate, authorize } from "../../common/middlewares/auth.middleware.js";
+import { forgotPassword, login, register, resetPassword, verifyEmail, verifyResetToken, getMe, logout } from "./auth.controller.js";
 import { loginValidation, registerValidation } from "./auth.validation.js";
 
 import { authRateLimiter } from "../../common/middlewares/rateLimit.middleware.js";
@@ -40,31 +40,29 @@ authRouter.post("/logout",
 authRouter.post("/forgot-password",
     // #swagger.tags = ['Auth']
     // #swagger.summary = 'Quên mật khẩu'
+    authRateLimiter,
     forgotPassword
 );
 
 authRouter.post("/reset-password",
     // #swagger.tags = ['Auth']
     // #swagger.summary = 'Đặt lại mật khẩu'
+    authRateLimiter,
     resetPassword
 );
 
 authRouter.post("/verify-token",
     // #swagger.tags = ['Auth']
     // #swagger.summary = 'Xác thực token đặt lại mật khẩu'
+    authRateLimiter,
     verifyResetToken
 );
 
 authRouter.post("/verify-email",
     // #swagger.tags = ['Auth']
     // #swagger.summary = 'Xác thực email'
+    authRateLimiter,
     verifyEmail
-);
-
-authRouter.post("/test-email",
-    // #swagger.tags = ['Auth']
-    // #swagger.summary = 'Kiểm tra kết nối gửi email'
-    testEmail
 );
 
 export default authRouter;

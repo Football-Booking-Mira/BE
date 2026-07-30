@@ -4,11 +4,11 @@ import { verifyToken } from '../../modules/auth/auth.utils.js';
 import User from '../../modules/users/user.models.js';
 
 const getTokenFromReq = (req) => {
-    // 1. Prioritize HttpOnly cookie
+    // 1. Read from HttpOnly cookie
     if (req.cookies && req.cookies.access_token) {
         return req.cookies.access_token;
     }
-    // 2. Fallback to Authorization Header
+    // 2. Fallback to Authorization Header (for API testing tools like Postman/Swagger)
     const authHeader = req.headers.authorization || req.headers.Authorization;
     if (!authHeader) return null;
     const parts = authHeader.split(' ');
@@ -28,9 +28,9 @@ export const authenticate = async (req, res, next) => {
     }
 
     try {
-        const payload = verifyToken(token); // { _id, role, iat, exp }
+        const payload = verifyToken(token); // Verified with explicit algorithm in auth.utils.js
 
-        //  Database Lookup: Ensure user exists and is active (chống token cũ/bị khóa)
+        // Database Lookup: Ensure user exists and is active
         const dbUser = await User.findById(payload._id).select('_id role status email name').lean();
         if (!dbUser) {
             return res
@@ -44,8 +44,9 @@ export const authenticate = async (req, res, next) => {
                 .json(createResponse(false, 401, 'Unauthorized: Tài khoản của bạn đã bị khóa hoặc chưa kích hoạt', null));
         }
 
-        // Attach verified MongoDB user data (not relying solely on payload)
+        // Attach trusted information to req.user (both id and _id for compatibility)
         req.user = {
+            id: dbUser._id.toString(),
             _id: dbUser._id,
             role: dbUser.role,
             status: dbUser.status,
@@ -61,26 +62,29 @@ export const authenticate = async (req, res, next) => {
     }
 };
 
-export const authorize =
-    (...allowedRoles) =>
-    (req, res, next) => {
-        if (!allowedRoles || allowedRoles.length === 0) return next();
+export const authorize = (...allowedRoles) => (req, res, next) => {
+    if (!req.user) {
+        return res
+            .status(401)
+            .json(createResponse(false, 401, 'Unauthorized: Yêu cầu đăng nhập trước khi thực hiện', null));
+    }
 
-        const user = req.user;
-        if (!user || !user.role) {
-            return res
-                .status(403)
-                .json(createResponse(false, 403, 'Forbidden: Thiếu thông tin quyền người dùng', null));
-        }
+    if (!allowedRoles || allowedRoles.length === 0) return next();
 
-        if (allowedRoles.includes(user.role)) return next();
-
-        // ADMIN luôn pass
-        if (user.role === USER_ROLES.ADMIN) return next();
-
+    const user = req.user;
+    if (!user.role) {
         return res
             .status(403)
-            .json(createResponse(false, 403, 'Forbidden: Bạn không có quyền truy cập tài nguyên này', null));
-    };
+            .json(createResponse(false, 403, 'Forbidden: Thiếu thông tin quyền người dùng', null));
+    }
 
-export default { authenticate, authorize };
+    if (allowedRoles.includes(user.role)) return next();
+
+    return res
+        .status(403)
+        .json(createResponse(false, 403, 'Forbidden: Bạn không có quyền truy cập tài nguyên này', null));
+};
+
+export const requireRole = authorize;
+
+export default { authenticate, authorize, requireRole };

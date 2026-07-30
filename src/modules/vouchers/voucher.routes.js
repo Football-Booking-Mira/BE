@@ -17,8 +17,8 @@ voucherRoutes.get('/public',
 );
 voucherRoutes.get('/debug',
     // #swagger.tags = ['Vouchers']
-    // #swagger.summary = 'Lấy danh sách voucher (debug)'
-    getVouchersDebug
+    // #swagger.summary = 'Lấy danh sách voucher (debug - admin only)'
+    authenticate, authorize(USER_ROLES.ADMIN), getVouchersDebug
 );
 voucherRoutes.get('/',
     // #swagger.tags = ['Vouchers']

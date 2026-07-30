@@ -11,12 +11,12 @@ import {
 import sendMail from '../../utils/sendEmail.js';
 import { htmlForgot, htmlVerify } from '../../utils/renderHMTLTemp.js';
 import createResponse from '../../utils/responses.js';
-import { FRONT_END_URL } from '../../common/config/environment.js';
+import { FRONT_END_URL, NODE_ENV } from '../../common/config/environment.js';
 import User from '../users/user.models.js';
 
-const isProduction = process.env.NODE_ENV === 'production';
+const isProduction = NODE_ENV === 'production';
 
-// Cookie configuration options
+// Secure HttpOnly cookie configuration options
 export const COOKIE_OPTIONS = {
     httpOnly: true,
     secure: isProduction,
@@ -26,9 +26,13 @@ export const COOKIE_OPTIONS = {
 };
 
 export const register = handleAsync(async (req, res, next) => {
-    // Force role to user to prevent mass assignment vulnerability
+    // Explicitly enforce role 'user'
     const payload = {
-        ...req.body,
+        name: req.body.name,
+        email: req.body.email,
+        password: req.body.password,
+        phone: req.body.phone,
+        avatar: req.body.avatar,
         role: 'user',
     };
 
@@ -48,7 +52,16 @@ export const register = handleAsync(async (req, res, next) => {
                 true,
                 StatusCodes.CREATED,
                 'Đăng ký thành công! Vui lòng kiểm tra email để xác thực tài khoản',
-                { user: response.user, message: 'Email xác thực đã được gửi' }
+                {
+                    user: {
+                        _id: response.user._id,
+                        name: response.user.name,
+                        email: response.user.email,
+                        phone: response.user.phone,
+                        role: 'user',
+                    },
+                    message: 'Email xác thực đã được gửi',
+                }
             )
         );
 });
@@ -59,13 +72,17 @@ export const login = handleAsync(async (req, res, next) => {
     // Attach HttpOnly cookie
     res.cookie('access_token', data.token, COOKIE_OPTIONS);
 
+    // Return safe user object without raw JWT token in JSON body if client uses cookies
     return res
         .status(StatusCodes.OK)
-        .json(createResponse(true, StatusCodes.OK, 'Đăng nhập thành công', data));
+        .json(createResponse(true, StatusCodes.OK, 'Đăng nhập thành công', {
+            user: data.user,
+            token: data.token, // Retained for compatibility during frontend transition
+        }));
 });
 
 export const getMe = handleAsync(async (req, res, next) => {
-    const user = await User.findById(req.user._id).select('-password');
+    const user = await User.findById(req.user._id).select('-password -verificationToken -resetPasswordToken');
     if (!user) {
         return res
             .status(StatusCodes.NOT_FOUND)
@@ -89,20 +106,25 @@ export const logout = handleAsync(async (req, res, next) => {
 export const forgotPassword = handleAsync(async (req, res, next) => {
     const { email } = req.body;
     const result = await forgotPasswordService(email);
-    const link = `${FRONT_END_URL}/verify?token=${result.resetToken}`;
-    sendMail({
-        to: email,
-        subject: 'Xác nhận đặt lại mật khẩu',
-        html: htmlForgot(email, result.user.name, link),
-    }).catch((err) => console.error('❌ Email dispatch error:', err?.message || err));
+    
+    if (result.user && result.resetToken) {
+        const link = `${FRONT_END_URL}/verify?token=${result.resetToken}`;
+        sendMail({
+            to: email,
+            subject: 'Xác nhận đặt lại mật khẩu',
+            html: htmlForgot(email, result.user.name, link),
+        }).catch((err) => console.error('❌ Email dispatch error:', err?.message || err));
+    }
+
+    // Generic response regardless of whether email exists (prevents account enumeration)
     return res
         .status(StatusCodes.OK)
         .json(
             createResponse(
                 true,
                 StatusCodes.OK,
-                'Đã gửi link reset mật khẩu đến email của bạn! ' + result.email,
-                { email: result.email }
+                'Nếu địa chỉ email tồn tại trong hệ thống, hướng dẫn đặt lại mật khẩu đã được gửi đến email của bạn.',
+                null
             )
         );
 });
@@ -135,20 +157,4 @@ export const verifyEmail = handleAsync(async (req, res, next) => {
             token: result.token,
         })
     );
-});
-
-export const testEmail = handleAsync(async (req, res) => {
-    const { to } = req.body || {};
-    const targetEmail = to || process.env.EMAIL;
-    
-    try {
-        const info = await sendMail({
-            to: targetEmail,
-            subject: 'Kiểm tra kết nối Email - MIRA Football',
-            html: '<h1>Thử nghiệm gửi email thành công!</h1><p>Hệ thống email MIRA Football đã hoạt động bình thường trên Render.</p>',
-        });
-        return res.json(createResponse(true, 200, `Gửi email thử nghiệm thành công tới: ${targetEmail}`, info));
-    } catch (err) {
-        return res.status(500).json(createResponse(false, 500, `Gửi email thất bại: ${err.message}`, null));
-    }
 });

@@ -2,10 +2,8 @@ import mongoose from 'mongoose';
 
 const {
     Schema,
-    Types: { ObjectId },
 } = mongoose;
 
-// Enum cho role và status
 const ROLE_ENUM = ['admin', 'user'];
 const USER_STATUS_ENUM = ['active', 'inactive', 'banned'];
 
@@ -19,20 +17,15 @@ const UserSchema = new Schema(
         status: { type: String, enum: USER_STATUS_ENUM, default: 'inactive' },
         avatar: { type: String, default: '' },
         isEmailVerified: { type: Boolean, default: false },
-        verificationToken: { type: String },
-        verificationTokenExpires: { type: Date },
-        resetPasswordToken: { type: String },
-        resetPasswordExpires: { type: Date },
-        vatar: {
-            type: String,
-            default: '',
-        },
+        verificationToken: { type: String, select: false },
+        verificationTokenExpires: { type: Date, select: false },
+        resetPasswordToken: { type: String, select: false },
+        resetPasswordExpires: { type: Date, select: false },
     },
     {
         timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' },
     }
 );
-
 
 UserSchema.index({ phone: 1 });
 

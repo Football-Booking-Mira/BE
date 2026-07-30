@@ -2,6 +2,7 @@ import handleAsync from '../../utils/handleAsync.js';
 import createError from '../../utils/error.js';
 import createResponse from '../../utils/responses.js';
 import Equipment from './equipment.models.js';
+import { isValidObjectId, sanitizeRegex } from '../../utils/validation.utils.js';
 
 // Tạo thiết bị
 export const createEquipment = handleAsync(async (req, res, next) => {
@@ -17,7 +18,7 @@ export const createEquipment = handleAsync(async (req, res, next) => {
         salePrice,
         description,
         image,
-    } = req.body; // đã được Zod parse sẵn
+    } = req.body;
 
     if (!code || !name || !unit || !mode) {
         return next(createError(400, 'Thiếu dữ liệu bắt buộc!'));
@@ -32,11 +33,11 @@ export const createEquipment = handleAsync(async (req, res, next) => {
         unit,
         mode,
         status,
-        totalQuantity,
-        availableQuantity,
-        rentPrice: Number(rentPrice) || 0,
-        salePrice: Number(salePrice) || 0,
-        description,
+        totalQuantity: Math.max(0, Number(totalQuantity) || 0),
+        availableQuantity: Math.max(0, Number(availableQuantity) || 0),
+        rentPrice: Math.max(0, Number(rentPrice) || 0),
+        salePrice: Math.max(0, Number(salePrice) || 0),
+        description: description ? String(description).trim() : '',
         image: image || '',
     });
 
@@ -48,8 +49,9 @@ export const getEquipments = handleAsync(async (req, res) => {
     const { q } = req.query;
     const query = {};
 
-    if (q) {
-        query.$or = [{ code: new RegExp(q, 'i') }, { name: new RegExp(q, 'i') }];
+    if (q && String(q).trim() !== '') {
+        const cleanQ = sanitizeRegex(String(q).trim());
+        query.$or = [{ code: new RegExp(cleanQ, 'i') }, { name: new RegExp(cleanQ, 'i') }];
     }
 
     const list = await Equipment.find(query).sort({ createdAt: -1 });
@@ -58,15 +60,46 @@ export const getEquipments = handleAsync(async (req, res) => {
 
 // Chi tiết 1 thiết bị
 export const getEquipmentDetail = handleAsync(async (req, res, next) => {
-    const doc = await Equipment.findById(req.params.id);
+    const { id } = req.params;
+    if (!isValidObjectId(id)) {
+        return next(createError(400, 'ID thiết bị không hợp lệ!'));
+    }
+
+    const doc = await Equipment.findById(id);
     if (!doc) return next(createError(404, 'Không tìm thấy thiết bị!'));
 
     return res.json(createResponse(true, 200, 'Lấy chi tiết thiết bị thành công!', doc));
 });
 
-// Cập nhật
+// Cập nhật thiết bị (allowlist fields to prevent mass assignment)
 export const updateEquipment = handleAsync(async (req, res, next) => {
-    const doc = await Equipment.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const { id } = req.params;
+    if (!isValidObjectId(id)) {
+        return next(createError(400, 'ID thiết bị không hợp lệ!'));
+    }
+
+    const allowedFields = [
+        'code',
+        'name',
+        'unit',
+        'mode',
+        'status',
+        'totalQuantity',
+        'availableQuantity',
+        'rentPrice',
+        'salePrice',
+        'description',
+        'image',
+    ];
+
+    const updateData = {};
+    for (const field of allowedFields) {
+        if (req.body[field] !== undefined) {
+            updateData[field] = req.body[field];
+        }
+    }
+
+    const doc = await Equipment.findByIdAndUpdate(id, updateData, { new: true, runValidators: true });
     if (!doc) return next(createError(404, 'Không tìm thấy thiết bị!'));
 
     return res.json(createResponse(true, 200, 'Cập nhật thiết bị thành công!', doc));
@@ -74,7 +107,12 @@ export const updateEquipment = handleAsync(async (req, res, next) => {
 
 // Xóa
 export const deleteEquipment = handleAsync(async (req, res, next) => {
-    const doc = await Equipment.findByIdAndDelete(req.params.id);
+    const { id } = req.params;
+    if (!isValidObjectId(id)) {
+        return next(createError(400, 'ID thiết bị không hợp lệ!'));
+    }
+
+    const doc = await Equipment.findByIdAndDelete(id);
     if (!doc) return next(createError(404, 'Không tìm thấy thiết bị!'));
 
     return res.json(createResponse(true, 200, 'Xóa thiết bị thành công!', null));
