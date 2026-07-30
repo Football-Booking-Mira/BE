@@ -14,7 +14,7 @@ import createResponse from '../../utils/responses.js';
 import { FRONT_END_URL, NODE_ENV } from '../../common/config/environment.js';
 import User from '../users/user.models.js';
 
-const isProduction = NODE_ENV === 'production';
+const isProduction = process.env.NODE_ENV === 'production' || NODE_ENV === 'production';
 
 // Secure HttpOnly cookie configuration options
 export const COOKIE_OPTIONS = {

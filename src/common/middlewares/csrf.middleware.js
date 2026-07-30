@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import createResponse from '../../utils/responses.js';
 import { FRONT_END_URL, NODE_ENV } from '../config/environment.js';
 
-const isProduction = NODE_ENV === 'production';
+const isProduction = process.env.NODE_ENV === 'production' || NODE_ENV === 'production';
 
 const COOKIE_OPTIONS = {
     httpOnly: false, // JS on frontend needs to read this cookie to send in header
@@ -11,15 +11,20 @@ const COOKIE_OPTIONS = {
     path: '/',
 };
 
-// Paths exempt from CSRF (server-to-server webhooks or public forms)
+// Paths exempt from CSRF (session initiation endpoints, server-to-server webhooks)
 const EXEMPT_PATHS = [
+    '/api/auth/login',
+    '/api/auth/register',
+    '/api/auth/forgot-password',
+    '/api/auth/reset-password',
+    '/api/auth/verify-email',
     '/api/payment/vnpay/return',
     '/api/payment/zalopay/return',
     '/api/payment/zalopay/callback',
 ];
 
 export const csrfProtection = (req, res, next) => {
-    // 1. Ensure a CSRF cookie exists
+    // 1. Ensure a CSRF cookie exists for the browser
     let csrfToken = req.cookies ? req.cookies['csrf_token'] : null;
 
     if (!csrfToken) {

@@ -51,23 +51,25 @@ const allowedOrigins = [
     'https://fe-git-dev-trinhquochungwork-sources-projects.vercel.app',
 ].filter(Boolean);
 
-// Strict CORS Allowlist Validation
+// Dynamic Origin Validation Helper (supports localhost, configured URLs, & Vercel preview domains)
+const isAllowedOrigin = (origin) => {
+    if (!origin) return true; // Server-to-server, Postman, mobile apps
+    if (allowedOrigins.includes(origin)) return true;
+    if (allowedOrigins.some((allowed) => allowed && origin.startsWith(allowed))) return true;
+    // Allow all Vercel deployment preview subdomains for this project (*.vercel.app)
+    if (origin.endsWith('.vercel.app')) return true;
+    return false;
+};
+
+// CORS Middleware Configuration
 app.use(
     cors({
         origin: function (origin, callback) {
-            // Allow requests without Origin header (like Mobile apps, Curl, or Server-to-Server callbacks)
-            if (!origin) {
-                return callback(null, true);
-            }
-
-            const isAllowed = allowedOrigins.some(
-                (allowed) => origin === allowed || origin.startsWith(allowed)
-            );
-
-            if (isAllowed) {
+            if (isAllowedOrigin(origin)) {
                 callback(null, true);
             } else {
-                callback(new Error(`CORS Error: Origin '${origin}' không được phép truy cập.`));
+                // Pass false instead of Error object so cors middleware sets proper response headers for preflight OPTIONS
+                callback(null, false);
             }
         },
         credentials: true,
@@ -99,7 +101,13 @@ app.use(errorMiddleware);
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: {
-        origin: allowedOrigins,
+        origin: function (origin, callback) {
+            if (isAllowedOrigin(origin)) {
+                callback(null, true);
+            } else {
+                callback(null, false);
+            }
+        },
         credentials: true,
     },
 });
@@ -115,14 +123,11 @@ io.use((socket, next) => {
             token = parsed.access_token;
         }
 
-        // Fallback to auth token passed in handshake auth object
         if (!token && socket.handshake.auth?.token) {
             token = socket.handshake.auth.token;
         }
 
         if (!token) {
-            // For public events (like court status updates), allow anonymous socket connections,
-            // but attach authenticated user data if valid token exists.
             socket.user = null;
             return next();
         }
@@ -131,7 +136,6 @@ io.use((socket, next) => {
         socket.user = decoded;
         next();
     } catch (err) {
-        // If invalid token, allow anonymous read-only socket or fail
         socket.user = null;
         next();
     }
