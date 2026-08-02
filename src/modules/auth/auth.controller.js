@@ -156,3 +156,16 @@ export const verifyEmail = handleAsync(async (req, res, next) => {
         })
     );
 });
+
+export const getCsrfToken = handleAsync(async (req, res, next) => {
+    let csrfToken = req.cookies ? req.cookies['csrf_token'] : null;
+    if (!csrfToken) {
+        csrfToken = (await import('crypto')).default.randomBytes(32).toString('hex');
+        const { COOKIE_OPTIONS: CSRF_COOKIE_OPTIONS } = await import('../../common/middlewares/csrf.middleware.js');
+        res.cookie('csrf_token', csrfToken, CSRF_COOKIE_OPTIONS);
+    }
+    res.setHeader('X-CSRF-Token', csrfToken);
+    return res
+        .status(StatusCodes.OK)
+        .json(createResponse(true, StatusCodes.OK, 'CSRF token retrieved', { csrfToken }));
+});

@@ -81,6 +81,7 @@ app.use(
             'Accept',
             'X-CSRF-Token',
         ],
+        exposedHeaders: ['X-CSRF-Token'],
     })
 );
 

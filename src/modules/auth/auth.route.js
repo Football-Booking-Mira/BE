@@ -1,12 +1,14 @@
 import { Router } from "express";
 import validBodyRequest from "../../common/middlewares/validBodyRequest.js";
 import { authenticate, authorize } from "../../common/middlewares/auth.middleware.js";
-import { forgotPassword, login, register, resetPassword, verifyEmail, verifyResetToken, getMe, logout } from "./auth.controller.js";
+import { forgotPassword, login, register, resetPassword, verifyEmail, verifyResetToken, getMe, logout, getCsrfToken } from "./auth.controller.js";
 import { loginValidation, registerValidation } from "./auth.validation.js";
 
 import { authRateLimiter } from "../../common/middlewares/rateLimit.middleware.js";
 
 const authRouter = Router();
+
+authRouter.get("/csrf", getCsrfToken);
 
 authRouter.post("/register",
     // #swagger.tags = ['Auth']
