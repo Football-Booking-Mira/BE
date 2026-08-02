@@ -72,11 +72,12 @@ export const login = handleAsync(async (req, res, next) => {
     // Attach HttpOnly cookie
     res.cookie('access_token', data.token, COOKIE_OPTIONS);
 
-    // Return safe user object without raw JWT token in JSON body
+    // Return safe user object and token for clients with cross-site cookie restrictions
     return res
         .status(StatusCodes.OK)
         .json(createResponse(true, StatusCodes.OK, 'Đăng nhập thành công', {
             user: data.user,
+            token: data.token,
         }));
 });
 
@@ -153,6 +154,7 @@ export const verifyEmail = handleAsync(async (req, res, next) => {
     return res.status(StatusCodes.OK).json(
         createResponse(true, StatusCodes.OK, result.message, {
             user: result.user,
+            token: result.token,
         })
     );
 });
