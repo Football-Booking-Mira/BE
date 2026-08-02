@@ -180,8 +180,8 @@ export function renderEmailTemplate(params) {
 const base = (type, email, name, link) =>
   renderEmailTemplate({
     type,
-    productName: "FPOLY",
-    companyName: "FPT Polytechnic",
+    productName: "Mira Football",
+    companyName: "Mira Football",
     email,
     userName: name,
     logoUrl: "https://logo.png",

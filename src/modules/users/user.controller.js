@@ -220,8 +220,8 @@ export const registerOnlineUser = handleAsync(async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Tạo token xác thực email
-    const verificationToken = crypto.randomBytes(32).toString('hex');
-    const verificationTokenExpires = Date.now() + 15 * 60 * 1000; // 15 phút
+    const verificationToken = generateToken({ email }, '24h');
+    const verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     const newUser = await User.create({
         name,

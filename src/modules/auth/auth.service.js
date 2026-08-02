@@ -121,7 +121,7 @@ export const resetPasswordService = async (resetToken, newPassword) => {
             _id: decoded._id,
             resetPasswordToken: resetToken,
             resetPasswordExpires: { $gt: new Date() },
-        });
+        }).select('+resetPasswordToken +resetPasswordExpires');
 
         if (!user) {
             throw createError(StatusCodes.BAD_REQUEST, 'Token reset không hợp lệ hoặc đã hết hạn!');
@@ -152,7 +152,7 @@ export const verifyResetTokenService = async (resetToken) => {
             _id: decoded._id,
             resetPasswordToken: resetToken,
             resetPasswordExpires: { $gt: new Date() },
-        });
+        }).select('+resetPasswordToken +resetPasswordExpires');
 
         if (!user) {
             throw createError(StatusCodes.BAD_REQUEST, 'Token reset không hợp lệ hoặc đã hết hạn!');
@@ -182,17 +182,17 @@ export const verifyEmailService = async (verificationToken) => {
 
         const user = await userModels.findOne({
             email: decoded.email,
-        });
+        }).select('+verificationToken +verificationTokenExpires');
 
         if (!user) {
             throw createError(StatusCodes.BAD_REQUEST, 'Email không tìm thấy trong hệ thống!');
         }
 
-        if (user.verificationToken !== verificationToken) {
+        if (user.verificationToken && user.verificationToken !== verificationToken) {
             throw createError(StatusCodes.BAD_REQUEST, 'Token xác thực không khớp!');
         }
 
-        if (!user.verificationTokenExpires || new Date() > user.verificationTokenExpires) {
+        if (user.verificationTokenExpires && new Date() > user.verificationTokenExpires) {
             throw createError(
                 StatusCodes.BAD_REQUEST,
                 'Token xác thực đã hết hạn! Vui lòng đăng ký lại.'
