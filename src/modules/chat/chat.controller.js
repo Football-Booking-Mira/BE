@@ -55,7 +55,7 @@ export const handleChat = handleAsync(async (req, res, next) => {
         return `- Thiết bị: ${e.name}, ${priceText}, Kho: ${e.availableQuantity || 0} ${e.unit || 'cái'}`;
     }).join('\n');
 
-    const systemPrompt = `Bạn là nhân viên tư vấn nhiệt tình của sân bóng đá. Tên bạn là AI-Coach. Nhiệm vụ của bạn là tư vấn cho khách hàng về việc thuê sân và thiết bị. 
+    const systemPrompt = `Bạn là nhân viên tư vấn nhiệt tình của Sân bóng MIRA. Tên bạn là MiraFootball - Trợ lý AI tư vấn trực tuyến 24/7. Nhiệm vụ của bạn là tư vấn cho khách hàng về việc thuê sân và thiết bị. 
 Dưới đây là thông tin hiện tại của các sân và thiết bị tại hệ thống của chúng tôi:
 
 ### DANH SÁCH SÂN:
@@ -73,43 +73,58 @@ Yêu cầu định dạng:
 - Dùng markdown để format (in đậm, danh sách) cho dễ đọc.
 - Giữ câu trả lời súc tích.`;
 
-    try {
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const modelsToTry = [
+        process.env.GEMINI_MODEL || 'gemini-1.5-flash',
+        'gemini-2.0-flash',
+        'gemini-1.5-pro',
+        'gemini-2.0-flash-exp'
+    ];
 
-        // Chuyển đổi định dạng lịch sử nếu được cung cấp
-        const formattedHistory = Array.isArray(history) ? history.map(h => ({
-            role: h.role === 'user' ? 'user' : 'model',
-            parts: [{ text: h.content || h.text }]
-        })) : [];
+    const formattedHistory = Array.isArray(history) ? history.map(h => ({
+        role: h.role === 'user' ? 'user' : 'model',
+        parts: [{ text: h.content || h.text || '' }]
+    })).filter(h => h.parts[0].text.trim() !== '') : [];
 
-        // Thêm system prompt như là chỉ thị đầu tiên
-        const chatSession = model.startChat({
-            history: [
-                {
-                    role: "user",
-                    parts: [{ text: "Hãy đọc và ghi nhớ chỉ thị sau:\n" + systemPrompt }]
+    let reply = null;
+    let lastError = null;
+
+    for (const modelName of modelsToTry) {
+        try {
+            const model = genAI.getGenerativeModel({ model: modelName });
+            const chatSession = model.startChat({
+                history: [
+                    {
+                        role: "user",
+                        parts: [{ text: "Hãy đọc và ghi nhớ chỉ thị sau:\n" + systemPrompt }]
+                    },
+                    {
+                        role: "model",
+                        parts: [{ text: "Tôi đã hiểu nhiệm vụ và thông tin hệ thống. Tôi là MiraFootball, sẵn sàng tư vấn cho khách hàng 24/7." }]
+                    },
+                    ...formattedHistory
+                ],
+                generationConfig: {
+                    maxOutputTokens: 1000,
+                    temperature: 0.7,
                 },
-                {
-                    role: "model",
-                    parts: [{ text: "Tôi đã hiểu nhiệm vụ và thông tin hệ thống. Tôi sẵn sàng tư vấn cho khách hàng." }]
-                },
-                ...formattedHistory
-            ],
-            generationConfig: {
-                maxOutputTokens: 1000,
-                temperature: 0.7,
-            },
-        });
+            });
 
-        const result = await chatSession.sendMessage(message);
-        const text = result.response.text();
+            const result = await chatSession.sendMessage(message);
+            reply = result.response.text();
+            if (reply) break;
+        } catch (err) {
+            console.warn(`[Gemini AI] Model ${modelName} call failed:`, err?.message || err);
+            lastError = err;
+        }
+    }
 
+    if (reply) {
         return res.status(200).json(
             createResponse(true, 200, 'Tư vấn thành công', {
-                reply: text
+                reply
             })
         );
-    } catch (error) {
-        return next(createError(500, 'Lỗi khi kết nối với AI tư vấn. Vui lòng thử lại sau. Chi tiết lỗi: ' + error.message));
     }
+
+    return next(createError(500, 'Lỗi khi kết nối với AI tư vấn. Vui lòng thử lại sau. Chi tiết lỗi: ' + (lastError?.message || 'Không có phản hồi từ AI')));
 });
