@@ -22,6 +22,7 @@ const EXEMPT_PATHS = [
     '/api/payment/vnpay/return',
     '/api/payment/zalopay/return',
     '/api/payment/zalopay/callback',
+    '/api/chat',
 ];
 
 export const csrfProtection = (req, res, next) => {
