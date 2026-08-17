@@ -54,9 +54,94 @@ export const getEquipments = handleAsync(async (req, res) => {
         query.$or = [{ code: new RegExp(cleanQ, 'i') }, { name: new RegExp(cleanQ, 'i') }];
     }
 
-    const list = await Equipment.find(query).sort({ createdAt: -1 });
+    let list = await Equipment.find(query).sort({ createdAt: -1 });
+
+    // Nếu DB chưa có thiết bị nào, tự động seed danh sách thiết bị mặc định vào MongoDB
+    if (list.length === 0 && (!q || String(q).trim() === '')) {
+        const defaultEquipments = [
+            {
+                code: 'G01',
+                name: 'Giày đinh bóng đá FX',
+                unit: 'đôi',
+                mode: 'both',
+                status: 'in_stock',
+                totalQuantity: 1000,
+                availableQuantity: 958,
+                rentPrice: 30000,
+                salePrice: 200000,
+                description: 'Giày đinh sân cỏ nhân tạo cao cấp, đủ size từ 38 - 44',
+            },
+            {
+                code: 'A001',
+                name: 'Áo pitch phân đội',
+                unit: 'cái',
+                mode: 'rent',
+                status: 'in_stock',
+                totalQuantity: 300,
+                availableQuantity: 277,
+                rentPrice: 30000,
+                salePrice: 0,
+                description: 'Áo bib lưới tập luyện xanh, đỏ, cam, vàng thoáng khí',
+            },
+            {
+                code: 'B01',
+                name: 'Bóng đá chuẩn FIFA 5',
+                unit: 'quả',
+                mode: 'both',
+                status: 'in_stock',
+                totalQuantity: 100,
+                availableQuantity: 65,
+                rentPrice: 30000,
+                salePrice: 300000,
+                description: 'Bóng đạt chuẩn thi đấu, da PU cao cấp êm ái',
+            },
+            {
+                code: 'GT01',
+                name: 'Găng tay thủ môn có xương',
+                unit: 'đôi',
+                mode: 'both',
+                status: 'in_stock',
+                totalQuantity: 50,
+                availableQuantity: 42,
+                rentPrice: 30000,
+                salePrice: 250000,
+                description: 'Găng tay thủ môn chuyên nghiệp dính bám chống lật ngón',
+            },
+            {
+                code: 'BG01',
+                name: 'Băng thun bảo vệ gối',
+                unit: 'chiếc',
+                mode: 'sell',
+                status: 'in_stock',
+                totalQuantity: 200,
+                availableQuantity: 180,
+                rentPrice: 0,
+                salePrice: 50000,
+                description: 'Băng gối thể thao co giãn 4 chiều hỗ trợ cơ khớp',
+            },
+            {
+                code: 'XGD01',
+                name: 'Bình xịt lạnh giảm đau chấn thương',
+                unit: 'chai',
+                mode: 'sell',
+                status: 'in_stock',
+                totalQuantity: 80,
+                availableQuantity: 4,
+                rentPrice: 0,
+                salePrice: 120000,
+                description: 'Bình xịt lạnh tức thì giảm sưng đau cho cầu thủ',
+            },
+        ];
+        try {
+            list = await Equipment.insertMany(defaultEquipments);
+        } catch (e) {
+            console.error('Lỗi seed thiết bị:', e);
+        }
+    }
+
     return res.json(createResponse(true, 200, 'Lấy danh sách thiết bị thành công!', list));
 });
+
 
 // Chi tiết 1 thiết bị
 export const getEquipmentDetail = handleAsync(async (req, res, next) => {
